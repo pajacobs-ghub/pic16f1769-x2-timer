@@ -1,7 +1,7 @@
 // uart_rx_tx.c
 // Demonstrate transmitting and receiving characters 
-// with the PIC16F1778 UART1 peripheral.
-// PJ, 2018-01-29
+// with the PIC16F1769 UART1 peripheral.
+// PJ, 2018-12-28 adapted from pic16f1778 version.
 //
 #include <xc.h>
 #pragma config FOSC = INTOSC
@@ -21,14 +21,14 @@ int main(void)
     char buf[32];
     char* buf_ptr;
     OSCCONbits.IRCF = 0b1110; // 8Mhz into 4xPLL to give FOSC=32MHz
-    TRISBbits.TRISB0 = 0; // output to LED on pin 21
-    ANSELBbits.ANSB0 = 0; // enable digital input
-    LATBbits.LATB0 = 1;
+    TRISCbits.TRISC6 = 0; // output to LED on pin 8
+    ANSELCbits.ANSC6 = 0; // enable digital input
+    LATCbits.LATC6 = 1;
     uart1_init(38400);
-    printf("\r\nDemonstration board with PIC16F1778.");
+    printf("\r\nDemonstration board with PIC16F1769.");
     while (1) {
         __delay_ms(500);
-        LATBbits.LATB0 ^= 1;
+        LATCbits.LATC6 ^= 1;
         printf("\r\nEnter some text: ");
         // Characters are echoed as they are typed.
         // Backspace deleting is allowed.

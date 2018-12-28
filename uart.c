@@ -1,7 +1,7 @@
 // uart.c
 // Functions to provide a shim between the C-standard library functions
-// and UART1 peripheral device on the PIC16F1778 microcontroller.
-// PJ, 2018-01-29
+// and UART1 peripheral device on the PIC16F1769 microcontroller.
+// PJ, 2018-12-28
 
 #include <xc.h>
 #include "global_defs.h"
@@ -17,16 +17,16 @@ void uart1_init(unsigned int baud)
     PPSLOCK = 0x55;
     PPSLOCK = 0xaa;
     PPSLOCKED = 0;
-    RXPPS = 0b10111; // RC7 is default
-    RC6PPS = 0b100100; // UART TX
+    RXPPS = 0b01101; // RB5 is default
+    RB7PPS = 0b10110; // UART TX
     PPSLOCK = 0x55;
     PPSLOCK = 0xaa;
     PPSLOCKED = 1;
-    ANSELCbits.ANSC6 = 0;
-    TRISCbits.TRISC6 = 0; // TX is output
-    LATCbits.LATC6 = 1; // idle high
-    TRISCbits.TRISC7 = 1; // RX is input
-    ANSELCbits.ANSC7 = 0; // enable digital input
+    ANSELBbits.ANSB7 = 0;
+    TRISBbits.TRISB7 = 0; // TX is output
+    LATBbits.LATB7 = 1; // idle high
+    TRISBbits.TRISB5 = 1; // RX is input
+    ANSELBbits.ANSB5 = 0; // enable digital input
     // Use 8N1 asynchronous
     TX1STAbits.SYNC = 0;
     BAUD1CONbits.BRG16 = 0;
