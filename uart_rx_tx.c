@@ -16,23 +16,29 @@
 #include "uart.h"
 #include <stdio.h>
 
+#define XON 0x11
+#define XOFF 0x13
+
 int main(void)
 {
-    char buf[32];
+    char buf[80];
     char* buf_ptr;
     OSCCONbits.IRCF = 0b1110; // 8Mhz into 4xPLL to give FOSC=32MHz
     TRISCbits.TRISC6 = 0; // output to LED on pin 8
     ANSELCbits.ANSC6 = 0; // enable digital input
     LATCbits.LATC6 = 1;
     uart1_init(38400);
+    putch(XOFF); // Stop the host from talking while the MCU talks.
     printf("\r\nDemonstration board with PIC16F1769.");
     while (1) {
         __delay_ms(500);
         LATCbits.LATC6 ^= 1;
         printf("\r\nEnter some text: ");
+        putch(XON); // Now, let the host talk.
         // Characters are echoed as they are typed.
         // Backspace deleting is allowed.
-        buf_ptr = gets(buf); 
+        buf_ptr = gets(buf);
+        putch(XOFF);
         printf("\rEntered text was: ");
         if (buf_ptr) { puts(buf); }
         printf("\r\nNow, do it again.");
