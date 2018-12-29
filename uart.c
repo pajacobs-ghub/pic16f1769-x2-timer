@@ -12,7 +12,7 @@
 void uart1_init(unsigned int baud)
 {
     unsigned int brg_value;
-    // Configure PPS MCU_RX=RC7, MCU_TX=RC6
+    // Configure PPS MCU_RX=RB5, MCU_TX=RB7 (like PIC18F14K22-I/P)
     GIE = 0;
     PPSLOCK = 0x55;
     PPSLOCK = 0xaa;
