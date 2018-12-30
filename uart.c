@@ -1,7 +1,9 @@
 // uart.c
 // Functions to provide a shim between the C-standard library functions
 // and UART1 peripheral device on the PIC16F1769 microcontroller.
-// PJ, 2018-12-28
+// PJ,
+// 2018-12-28 Adapted from PIC16F1778 example.
+// 2018-12-30 RTS/CTS flow control
 
 #include <xc.h>
 #include "global_defs.h"
@@ -27,6 +29,15 @@ void uart1_init(unsigned int baud)
     LATBbits.LATB7 = 1; // idle high
     TRISBbits.TRISB5 = 1; // RX is input
     ANSELBbits.ANSB5 = 0; // enable digital input
+    // Hardware Flow Control
+    // Host-CTS# RA2 pin 17, MCU output
+    ANSELAbits.ANSA2 = 0;
+    TRISAbits.TRISA2 = 0;
+    // Start out saying that it is not clear to send.
+    LATAbits.LATA2 = 1;
+    // Host-RTS# RC0 pin 16, MCU input
+    ANSELCbits.ANSC0 = 0;
+    TRISCbits.TRISC0 = 1;
     // Use 8N1 asynchronous
     TX1STAbits.SYNC = 0;
     BAUD1CONbits.BRG16 = 0;
@@ -43,6 +54,8 @@ void uart1_init(unsigned int baud)
 
 void putch(char data)
 {
+    // Wait until PC/Host is requesting.
+    while (PORTCbits.RC0) { CLRWDT(); }
     // Wait until shift-register empty, then send data.
     while (!TX1STAbits.TRMT) { CLRWDT(); }
     TX1REG = data;
@@ -58,8 +71,13 @@ __bit kbhit(void)
 char getch(void)
 {
     char c;
+    // Let the PC/Host know that it is clear to send.
+    LATAbits.LATA2 = 0;
     // Block until a character is available in buffer.
     while (!PIR1bits.RCIF) { CLRWDT(); }
+    // Let PC/Host know that it is not clear to send.
+    LATAbits.LATA2 = 1;
+    // Get the data that came in.
     c = RC1REG;
     // Clear possible overflow error.
     if (RC1STAbits.OERR) { 
