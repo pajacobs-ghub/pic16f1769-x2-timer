@@ -1,0 +1,39 @@
+PIC16F1769-I/P x2-timer commands and registers
+
+
+Command     Action
+------------------------------------------------------------------
+v           report version of firmware
+
+n           report number of registers
+r <i>       report value of register i
+s <i> <j>   set register i to integer value j
+R           restore register values from HEFlash
+S           save current register values to HEFlash
+F           set registers to original values
+
+a           arm device and wait for event
+m           wait for manual arm (closing SW0)
+
+c <i>       convert analogue channel i
+            i       channel name
+            ---------------------
+            30      DAC1_output
+            28      DAC2_output
+            5       RC1/AN5/C1IN1-
+            6       RC2/AN6/C2IN2-
+------------------------------------------------------------------
+
+            
+Register    Description
+------------------------------------------------------------------
+0           trigger mode
+              1  simple trigger firmware, both outputs immediate
+              2  simple trigger hardware, both outputs immediate
+              3  delayed trigger, one output immediate, one delayed
+              4  measured delay, one output immediate, one delayed
+1           trigger level 1 as a 10-bit count, 0-1023
+2           trigger level 2 as a 10-bit count, 0-1023
+3           delay as a 16-bit count
+------------------------------------------------------------------
+

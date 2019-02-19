@@ -1,6 +1,10 @@
 // x2timer_pic16f1769.c
-// X2 trigger and timer box rebuilt around a PIC16F1769-I/P.
-// PJ, MechEng, UQ.
+// X2/T6 trigger and timer box rebuilt around a PIC16F1769-I/P.
+//
+// Peter Jacobs (1) and Peter Collen (2)
+// (1) School of Mechanical and Mining Engineering, University of Queensland.
+// (2) Oxford Thermofluids Institute, University of Oxford
+//
 // 2018-01-30 start this firmware for PIC16F1778-I/SP.
 // 2018-02-02 mode 1 complete with save/restore registers.
 // 2019-02-19 port to PIC16F1769
@@ -27,30 +31,28 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.1 2019-02-19 PJ";
+const char * version_string = "Version 0.2 2019-02-20 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
 #define LED_PWR LATCbits.LATC7
 
-// Parameters controlling the device are stored in an array of registers.
+// Parameters controlling the device are stored in virtual registers.
 #define NUMREG 4
-int16_t registers[NUMREG]; // working copy in SRAM
-// register description
-// 0        mode
-// 1        trigger level as a 10-bit count, 0-1023
-// 2        delay-A as a 16-bit count
-// 3        delay-B as a 16-bit count
+int16_t vregister[NUMREG]; // working copy in SRAM
 
-// Text buffer for incoming commands.
-// They are expected to be short.
-// Be careful, overruns are not handled well.
-char cmd_buf[32];
+void set_registers_to_original_values()
+{
+    vregister[0] = 1;   // trigger mode
+    vregister[1] = 200; // trigger level 1 as a 10-bit count, 0-1023
+    vregister[2] = 200; // trigger level 2 as a 10-bit count, 0-1023
+    vregister[3] = 100; // delay as a 16-bit count
+}
 
 // High Endurance Flash block is used to hold the parameters
 // when the power is off.
 const char HEFdata[FLASH_ROWSIZE] __at(HEFLASH_START) = {
-    1,0, 200,0, 1,0, 1,0,
+    1,0, 200,0, 200,0, 100,0,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
@@ -58,13 +60,18 @@ const char HEFdata[FLASH_ROWSIZE] __at(HEFLASH_START) = {
 
 char save_registers_to_HEF()
 {
-    return HEFLASH_writeBlock(0, (void*)registers, NUMREG*2);
+    return HEFLASH_writeBlock(0, (void*)vregister, NUMREG*2);
 }
 
 char restore_registers_from_HEF()
 {
-    return HEFLASH_readBlock((void*)registers, 0, NUMREG*2);
+    return HEFLASH_readBlock((void*)vregister, 0, NUMREG*2);
 }
+
+// Text buffer for incoming commands.
+// They are expected to be short.
+// Be careful, overruns are not handled well.
+char cmd_buf[32];
 
 void init_peripherals()
 {
@@ -112,8 +119,16 @@ void init_peripherals()
     DAC1CON0bits.NSS = 0; // Vss
     DAC1CON0bits.FM = 0; // right justified format
     DAC1CON0bits.EN = 1;
-    DAC1REF = (uint16_t)registers[1];
+    DAC1REF = (uint16_t)vregister[1];
     DACLDbits.DAC1LD = 1;
+    //
+    // Digital to analog converter 2
+    DAC2CON0bits.PSS = 0b10; // FVR_buffer2
+    DAC2CON0bits.NSS = 0; // Vss
+    DAC2CON0bits.FM = 0; // right justified format
+    DAC2CON0bits.EN = 1;
+    DAC2REF = (uint16_t)vregister[2];
+    DACLDbits.DAC2LD = 1;
     //
     // Comparator 1
     CM1NSELbits.NCH = 0b001; // C1IN1-/RC1 pin
@@ -123,12 +138,12 @@ void init_peripherals()
     //
     // Comparator 2
     CM2NSELbits.NCH = 0b010; // C2IN2-/RC2 pin
-    CM2PSELbits.PCH = 0b1010; // DAC1_output
+    CM2PSELbits.PCH = 0b1011; // DAC2_output
     CM2CON0bits.POL = 1; // invert output polarity
     CM2CON0bits.ON = 1;
     //
     // Configurable logic cell 3 will be set up later,
-    // in the arm_mode() function.
+    // in the trigger_using_hardware() function.
     //
     // Flash the LEDs a moment and then settle to power-on.
     for (int8_t i=0; i < 2; ++i ) {
@@ -138,72 +153,143 @@ void init_peripherals()
     LED_PWR = 1;
 }
 
-void update_dac1(void)
+void update_dacs(void)
 {
-    DAC1REF = (uint16_t)registers[1];
+    DAC1REF = (uint16_t)vregister[1];
     DACLDbits.DAC1LD = 1;
+    DAC2REF = (uint16_t)vregister[2];
+    DACLDbits.DAC2LD = 1;
 }
 
 uint16_t read_adc(uint8_t chan)
 {
     ADCON0bits.CHS = chan;
+    __delay_ms(10);
     ADCON0bits.GO = 1;
     NOP();
     while (ADCON0bits.GO) { NOP(); }
     return ADRES;
 }
 
+void trigger_simple_firmware(void)
+{
+    // Firmware-controlled trigger, both outputs immediate.
+    // Use MCU to monitor and control the state of bits.
+    //
+    // Leave RC4 and RC5 controlled by their latch.
+    LATC &= 0b11001111;
+    LED_ARM = 1;
+    // Wait for the comparator to go high.
+    while (!CMOUTbits.MC1OUT) { CLRWDT(); }
+    LATC |= 0b00110000;
+    __delay_ms(500);
+    LATC &= 0b11001111;
+    LED_ARM = 0;
+} // end trigger_simple_firmware()
+
+void trigger_simple_hardware(void)
+{
+    // Hardware-only trigger, both outputs immediate.
+    // This should be the fastest response to an event.
+    //
+    // Set up CLC3 to extend the Comparator pulse indefinitely.
+    //
+    // [FIX-ME] PJ 2019-02-20
+    // This is not working as it did for the PIC16F1778.
+    //
+    CLC3CONbits.EN = 0;
+    CLC3CONbits.MODE = 0b100; // D flip-flop
+    CLC3POLbits.POL = 0; // not inverted
+    CLC3SEL0bits.D1S = 0x000111; // sync_C1OUT as data1 for 
+    CLC3SEL1bits.D2S = 0; // none (CLCIN0 via PPS, but is ignored)
+    CLC3SEL2bits.D3S = 0; // none
+    CLC3SEL3bits.D4S = 0; // none
+    // Steer the output to the MCU pins.
+    GIE = 0; PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 0;
+    RC4PPS = 0b00011; // LC3_out
+    RC5PPS = 0b00011; // LC3_out also
+    PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
+    //
+    CLC3GLS0 = 0x10; // gate 1, send data1 through true
+    CLC3GLS1 = 0; // gate 2, logic 0
+    CLC3GLS2 = 0; // gate 3, logic 0
+    CLC3GLS3 = 0; // gate 4, logic 0
+    CLC3POLbits.G1POL = 0; 
+    CLC3POLbits.G2POL = 1; // invert 0 to get logic 1
+    CLC3POLbits.G3POL = 0;
+    CLC3POLbits.G4POL = 0;
+    CLC3CONbits.EN = 1;
+    NOP();
+    // At this point we have nothing to do but
+    // wait for the comparator to go high.
+    LED_ARM = 1;
+    while (!CLCDATAbits.MCLC3OUT) { CLRWDT(); }
+    __delay_ms(500);
+    // End of output pulse; clean up by steering
+    // the original data latch values to pins.
+    GIE = 0; PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 0;
+    RC4PPS = 0; // Return control to LATC4
+    RC5PPS = 0; // Return control to LATC5
+    PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
+    CLC3CONbits.EN = 0; // Disable flip-flop
+    LED_ARM = 0;
+} // end trigger_simple_hardware()
+
+void trigger_delayed_firmware(void)
+{
+    // Trigger from comparator 1.
+    // Output 1 immediate, output 2 fixed delay. 
+    
+} // end trigger_delayed_firmware()
+
+void trigger_measured_delay(void)
+{
+    // Start timing on comparator 1.
+    // Output 1 immediate.
+    // Stop timing on comparator 2.
+    // Output 2 after computed delay plus fixed delay.
+    
+} // end trigger_measured_delay()
+
 void arm_and_wait_for_event(void)
 {
     int nchar;
-    switch (registers[0]) {
+    switch (vregister[0]) {
         case 1:
-            nchar = printf("armed mode 1, both outputs immediate. ");
+            nchar = printf("armed mode 1, simple firmware, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
                 printf("C1OUT already high. fail");
                 break;
             }
-            // Set up CLC3 to extend the Comparator pulse indefinitely.
-            CLC3CONbits.EN = 0;
-            CLC3CONbits.MODE = 0b100; // D flip-flop
-            CLC3POLbits.POL = 0; // not inverted
-            CLC3SEL0bits.D1S = 0x000111; // sync_C1OUT as data1 for 
-            CLC3SEL1bits.D2S = 0; // none (CLCIN0 via PPS, but is ignored)
-            CLC3SEL2bits.D3S = 0; // none
-            CLC3SEL3bits.D4S = 0; // none
-            // Steer the output to the MCU pins.
-            GIE = 0; PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 0;
-            RC4PPS = 0b00011; // LC3_out
-            RC5PPS = 0b00011; // LC3_out also
-            PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
-            //
-            CLC3GLS0 = 0x10; // gate 1, send data1 through true
-            CLC3GLS1 = 0; // gate 2, logic 0
-            CLC3GLS2 = 0; // gate 3, logic 0
-            CLC3GLS3 = 0; // gate 4, logic 0
-            CLC3POLbits.G1POL = 0; 
-            CLC3POLbits.G2POL = 1; // invert 0 to get logic 1
-            CLC3POLbits.G3POL = 0;
-            CLC3POLbits.G4POL = 0;
-            CLC3CONbits.EN = 1;
-            NOP();
-            // At this point we have nothing to do but
-            // wait for the comparator to go high.
-            LED_ARM = 1;
-            while (!CLCDATAbits.MCLC3OUT) { CLRWDT(); }
-            __delay_ms(500);
-            // End of output pulse; clean up by steering
-            // the original data latch values to pins.
-            GIE = 0; PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 0;
-            RC4PPS = 0; // Return control to LATC4
-            RC5PPS = 0; // Return control to LATC5
-            PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
-            CLC3CONbits.EN = 0; // Disable flip-flop
-            LED_ARM = 0;
+            trigger_simple_firmware();
             nchar = printf("triggered. ok");
             break;
         case 2:
-            nchar = printf("need to implement mode 2 delay. fail");
+            nchar = printf("armed mode 2, simple hardware, both outputs immediate. ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            trigger_simple_hardware();
+            nchar = printf("triggered. ok");
+            break;
+        case 3:
+            nchar = printf("armed mode 3, one output immediate, one fixed delay. ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            trigger_delayed_firmware();
+            nchar = printf("triggered. ok");
+            break;
+        case 4:
+            nchar = printf("armed mode 4, one output immediate, one measured delay. ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            trigger_measured_delay();
+            nchar = printf("triggered. ok");
             break;
         default:
             nchar = printf("unknown mode. fail");
@@ -237,13 +323,6 @@ void interpret_command()
         case 'v':
             nchar = printf("%s ok", version_string);
             break;
-        case 'a':
-            arm_and_wait_for_event();
-            break;
-        case 'm':
-            nchar = printf("wait for arm button on box ");
-            wait_for_manual_arm();
-            break;
         case 'n':
             nchar = printf("%u ok", NUMREG);
             break;
@@ -254,7 +333,7 @@ void interpret_command()
                 // Found some nonblank text, assume register number.
                 i = (uint8_t) atoi(token_ptr);
                 if (i < NUMREG) {
-                    v = registers[i];
+                    v = vregister[i];
                     nchar = printf("%d ok", v);
                 } else {
                     nchar = printf("fail");
@@ -275,9 +354,9 @@ void interpret_command()
                     if (token_ptr) {
                         // Assume text is value for register.
                         v = (int16_t) atoi(token_ptr);
-                        registers[i] = v;
+                        vregister[i] = v;
                         nchar = printf("reg[%u] %d ok", i, v);
-                        if (i == 1) { update_dac1(); }
+                        if (i == 1 || i == 2) { update_dacs(); }
                     } else {
                         nchar = printf("fail");
                     }
@@ -302,13 +381,24 @@ void interpret_command()
                 nchar = printf("ok");
             }
             break;
+        case 'F':
+            set_registers_to_original_values();
+            nchar = printf("ok");
+            break;
+        case 'a':
+            arm_and_wait_for_event();
+            break;
+        case 'm':
+            nchar = printf("wait for arm button on box ");
+            wait_for_manual_arm();
+            break;
         case 'c':
             // Report an ADC value.
             token_ptr = strtok(&cmd_buf[1], sep_tok);
             if (token_ptr) {
                 // Found some nonblank text, assume channel number.
                 i = (uint8_t) atoi(token_ptr);
-                if (i <= 11) {
+                if (i <= 31) {
                     v = read_adc(i);
                     nchar = printf("%d ok", v);
                 } else {
@@ -335,12 +425,9 @@ int main(void)
     // Power-on values for registers.
     if (restore_registers_from_HEF()) {
         nchar = printf("Failed to restore registers from HEF.");
-        registers[0] = 1; // mode
-        registers[1] = 200; // trigger level 0-1023
-        registers[2] = 1; // delay1 in counts
-        registers[3] = 1; // delay2 in counts
+        set_registers_to_original_values();
     }
-    update_dac1();
+    update_dacs();
     //
     // Announce that the box is awake.
     nchar = printf("\r\nX2 trigger and timer, %s.", version_string);
