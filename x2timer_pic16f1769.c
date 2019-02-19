@@ -68,20 +68,23 @@ char restore_registers_from_HEF()
 
 void init_peripherals()
 {
+    // Initializing the UART sets pins RA2,RC0,RB5,RB7.
     uart1_init(38400);
-    // Pins RB7, RC4,RC5,RC6,RC7 are digital-outputs.
+    //
+    // Pins RB7,RC4,RC5,RC6,RC7 are digital-outputs.
     TRISBbits.TRISB7 = 0; ANSELBbits.ANSB7 = 0; LATBbits.LATB7 = 0;
     TRISCbits.TRISC4 = 0; LATCbits.LATC4 = 0;
     TRISCbits.TRISC5 = 0; LATCbits.LATC5 = 0;
-    TRISCbits.TRISC6 = 0; ANSELCbits.ANSC6 = 0; LATCbits.LATC6 = 0;
-    TRISCbits.TRISC7 = 0; ANSELCbits.ANSC7 = 0; LATCbits.LATC7 = 0;
-    TRISCbits.TRISC1 = 0; LATCbits.LATC1 = 0; 
-    TRISCbits.TRISC2 = 0; ANSELCbits.ANSC2 = 0; LATCbits.LATC2 = 0;
-    // We also want the high-current drive enabled on RB0 and RB1.
+    // We also want the high-current drive enabled on RC4 and RC5.
     HIDRVC = 0b00110000;
+    TRISCbits.TRISC6 = 0; ANSELCbits.ANSC6 = 0; LATCbits.LATC6 = 0; // LED_ARM
+    TRISCbits.TRISC7 = 0; ANSELCbits.ANSC7 = 0; LATCbits.LATC7 = 0; // LED_PWR
     //
     // RA5 used as digital-input for arm button on box.
-    // Enable its weak pull-up.
+    // Enable its weak pull-up but disable all others.
+    WPUA = 0;
+    WPUB = 0;
+    WPUC = 0;
     TRISAbits.TRISA5 = 1; WPUAbits.WPUA5 = 1;
     OPTION_REGbits.nWPUEN = 0;
     //
@@ -113,13 +116,13 @@ void init_peripherals()
     DACLDbits.DAC1LD = 1;
     //
     // Comparator 1
-    CM1NSELbits.NCH = 0b0001; // C1IN1-/RC1 pin
+    CM1NSELbits.NCH = 0b001; // C1IN1-/RC1 pin
     CM1PSELbits.PCH = 0b1010; // DAC1_output
     CM1CON0bits.POL = 1; // invert output polarity
     CM1CON0bits.ON = 1;
     //
     // Comparator 2
-    CM2NSELbits.NCH = 0b0010; // C2IN2-/RC2 pin
+    CM2NSELbits.NCH = 0b010; // C2IN2-/RC2 pin
     CM2PSELbits.PCH = 0b1010; // DAC1_output
     CM2CON0bits.POL = 1; // invert output polarity
     CM2CON0bits.ON = 1;
@@ -150,12 +153,12 @@ uint16_t read_adc(uint8_t chan)
     return ADRES;
 }
 
-void arm_mode(void)
+void arm_and_wait_for_event(void)
 {
     int nchar;
     switch (registers[0]) {
         case 1:
-            nchar = printf("armed mode 1, all outputs immediate. ");
+            nchar = printf("armed mode 1, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
                 printf("C1OUT already high. fail");
                 break;
@@ -214,7 +217,7 @@ void wait_for_manual_arm(void)
         if (!PORTAbits.RA5) {
             __delay_ms(10); // to be sure that it is not a glitch
             if (!PORTAbits.RA5) {
-                arm_mode(); 
+                arm_and_wait_for_event(); 
                 break;
             }
         }
@@ -235,7 +238,7 @@ void interpret_command()
             nchar = printf("%s ok", version_string);
             break;
         case 'a':
-            arm_mode();
+            arm_and_wait_for_event();
             break;
         case 'm':
             nchar = printf("wait for arm button on box ");
