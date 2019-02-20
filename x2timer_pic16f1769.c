@@ -269,17 +269,16 @@ void trigger_measured_delay(void)
     T1CONbits.T1ON = 1;
     LATC |= 0b00100000; // RC5 is immediate output.
     // With timer counting, wait for event B.
-    //
-    // [FIX-ME] Have to run to UQ now, but this is not yet behaving PJ 2019-02-20
-    //
     while (!CMOUTbits.MC2OUT) { CLRWDT(); }
     my_count = TMR1;
     // Leave the timer counting and set up the compare value,
     // assuming that the time to go is roughly equal to the time
     // between events A and B.
     my_count = my_count * 2 + extra_delay;
-    PIR1bits.CCP1IF = 0;
+    // [TODO] Check that we don't overflow.
     CCPR1 = my_count;
+    PIR1bits.CCP1IF = 0;
+    CCP1CONbits.EN = 1;
     while (!PIR1bits.CCP1IF) { CLRWDT(); }
     // We have waited the appointed time.
     LATC |= 0b00010000; // RC4 is delayed output.
