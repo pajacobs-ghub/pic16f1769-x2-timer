@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.2 2019-02-20 PJ&PC";
+const char * version_string = "Version 0.3 2019-02-20 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -248,7 +248,44 @@ void trigger_measured_delay(void)
     // Output 1 immediate.
     // Stop timing on comparator 2.
     // Output 2 after computed delay plus fixed delay.
-    
+    // Use MCU to monitor and control the state of bits.
+    //
+    uint16_t extra_delay = vregister[3];
+    uint16_t my_count = 0;
+    //
+    // Leave RC4 and RC5 controlled by their latch.
+    LATC &= 0b11001111;
+    // Set up Timer1, driven by 8MHz (FOSC/4) instruction clock.
+    T1CONbits.CS = 0b00;
+    T1CONbits.CKPS = 0b00; // Prescale of 1.
+    T1GCONbits.GE = 0; // Timer is always counting, once on.
+    PIR1bits.TMR1IF = 0;
+    // Set up Compare module, looking at Timer1.
+    CCP1CONbits.MODE = 0b0010; // Compare mode, toggle output on match.
+    PIR1bits.CCP1IF = 0;
+    LED_ARM = 1;
+    // Wait for comparator 1 to go high, event A.
+    while (!CMOUTbits.MC1OUT) { CLRWDT(); }
+    T1CONbits.T1ON = 1;
+    LATC |= 0b00100000; // RC5 is immediate output.
+    // With timer counting, wait for event B.
+    //
+    // [FIX-ME] Have to run to UQ now, but this is not yet behaving PJ 2019-02-20
+    //
+    while (!CMOUTbits.MC2OUT) { CLRWDT(); }
+    my_count = TMR1;
+    // Leave the timer counting and set up the compare value,
+    // assuming that the time to go is roughly equal to the time
+    // between events A and B.
+    my_count = my_count * 2 + extra_delay;
+    PIR1bits.CCP1IF = 0;
+    CCPR1 = my_count;
+    while (!PIR1bits.CCP1IF) { CLRWDT(); }
+    // We have waited the appointed time.
+    LATC |= 0b00010000; // RC4 is delayed output.
+    __delay_ms(500);
+    LATC &= 0b11001111;
+    LED_ARM = 0;
 } // end trigger_measured_delay()
 
 void arm_and_wait_for_event(void)
