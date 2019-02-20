@@ -31,7 +31,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.3 2019-02-20 PJ&PC";
+const char * version_string = "Version 0.4 2019-02-21 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -44,15 +44,15 @@ int16_t vregister[NUMREG]; // working copy in SRAM
 void set_registers_to_original_values()
 {
     vregister[0] = 1;   // trigger mode
-    vregister[1] = 200; // trigger level 1 as a 10-bit count, 0-1023
-    vregister[2] = 200; // trigger level 2 as a 10-bit count, 0-1023
-    vregister[3] = 100; // delay as a 16-bit count
+    vregister[1] = 5;   // trigger level 1 as a 10-bit count, 0-1023
+    vregister[2] = 5;   // trigger level 2 as a 10-bit count, 0-1023
+    vregister[3] = 0;   // delay as a 16-bit count
 }
 
 // High Endurance Flash block is used to hold the parameters
 // when the power is off.
 const char HEFdata[FLASH_ROWSIZE] __at(HEFLASH_START) = {
-    1,0, 200,0, 200,0, 100,0,
+    1,0, 5,0, 5,0, 0,0,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
     0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff
@@ -251,40 +251,51 @@ void trigger_measured_delay(void)
     // Use MCU to monitor and control the state of bits.
     //
     uint16_t extra_delay = vregister[3];
-    uint16_t my_count = 0;
+    uint16_t tmr_count, cmp_count;
+    int nchar;
     //
     // Leave RC4 and RC5 controlled by their latch.
     LATC &= 0b11001111;
     // Set up Timer1, driven by 8MHz (FOSC/4) instruction clock.
+    T1CONbits.ON = 0;
     T1CONbits.CS = 0b00;
     T1CONbits.CKPS = 0b00; // Prescale of 1.
     T1GCONbits.GE = 0; // Timer is always counting, once on.
+    TMR1 = 0;
     PIR1bits.TMR1IF = 0;
     // Set up Compare module, looking at Timer1.
-    CCP1CONbits.MODE = 0b0010; // Compare mode, toggle output on match.
+    CCP1CONbits.MODE = 0b1000; // Compare mode, set output on match.
     PIR1bits.CCP1IF = 0;
     LED_ARM = 1;
     // Wait for comparator 1 to go high, event A.
     while (!CMOUTbits.MC1OUT) { CLRWDT(); }
-    T1CONbits.T1ON = 1;
+    T1CONbits.ON = 1;
     LATC |= 0b00100000; // RC5 is immediate output.
     // With timer counting, wait for event B.
     while (!CMOUTbits.MC2OUT) { CLRWDT(); }
-    my_count = TMR1;
+    tmr_count = TMR1;
     // Leave the timer counting and set up the compare value,
     // assuming that the time to go is roughly equal to the time
     // between events A and B.
-    my_count = my_count * 2 + extra_delay;
+    cmp_count = tmr_count * 2 + extra_delay;
     // [TODO] Check that we don't overflow.
-    CCPR1 = my_count;
-    PIR1bits.CCP1IF = 0;
+    // This should not be a real problem for the cases that interest us.
+    // A period of 50us between events A, B should give a first count of 400.
+    // Doubling that and adding a bit should be OK.
+    CCPR1 = cmp_count;
     CCP1CONbits.EN = 1;
-    while (!PIR1bits.CCP1IF) { CLRWDT(); }
+    while (!CCP1CONbits.OUT) { CLRWDT(); }
     // We have waited the appointed time.
     LATC |= 0b00010000; // RC4 is delayed output.
+    //
+    // Our work is done, so we now clean up at a leisurely pace.
+    T1CONbits.ON = 0;
+    CCP1CONbits.EN = 0;
+    CCP1CONbits.MODE = 0;
     __delay_ms(500);
     LATC &= 0b11001111;
     LED_ARM = 0;
+    nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
 } // end trigger_measured_delay()
 
 void arm_and_wait_for_event(void)
@@ -294,7 +305,7 @@ void arm_and_wait_for_event(void)
         case 1:
             nchar = printf("armed mode 1, simple firmware, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                nchar = printf("C1OUT already high. fail");
                 break;
             }
             trigger_simple_firmware();
@@ -303,7 +314,7 @@ void arm_and_wait_for_event(void)
         case 2:
             nchar = printf("armed mode 2, simple hardware, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                nchar = printf("C1OUT already high. fail");
                 break;
             }
             trigger_simple_hardware();
@@ -312,7 +323,7 @@ void arm_and_wait_for_event(void)
         case 3:
             nchar = printf("armed mode 3, one output immediate, one fixed delay. ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                nchar = printf("C1OUT already high. fail");
                 break;
             }
             trigger_delayed_firmware();
