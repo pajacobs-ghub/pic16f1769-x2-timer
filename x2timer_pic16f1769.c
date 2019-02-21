@@ -32,7 +32,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.5 2019-02-21 PJ&PC";
+const char * version_string = "Version 0.6 2019-02-22 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -191,17 +191,13 @@ void trigger_simple_firmware(void)
 void trigger_simple_hardware(void)
 {
     // Hardware-only trigger, both outputs immediate.
-    // This should be the fastest response to an event.
-    //
     // Set up CLC3 to extend the Comparator pulse indefinitely.
-    //
-    // [FIX-ME] PJ 2019-02-20
-    // This is not working as it did for the PIC16F1778.
+    // This should be the fastest response to an event.
     //
     CLC3CONbits.EN = 0;
     CLC3CONbits.MODE = 0b100; // D flip-flop
     CLC3POLbits.POL = 0; // not inverted
-    CLC3SEL0bits.D1S = 0x000111; // sync_C1OUT as data1 for 
+    CLC3SEL0bits.D1S = 0b000111; // sync_C1OUT as data1 for 
     CLC3SEL1bits.D2S = 0; // none (CLCIN0 via PPS, but is ignored)
     CLC3SEL2bits.D3S = 0; // none
     CLC3SEL3bits.D4S = 0; // none
@@ -211,7 +207,7 @@ void trigger_simple_hardware(void)
     RC5PPS = 0b00011; // LC3_out also
     PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
     //
-    CLC3GLS0 = 0x10; // gate 1, send data1 through true
+    CLC3GLS0 = 0b10; // gate 1, send data1 through true
     CLC3GLS1 = 0; // gate 2, logic 0
     CLC3GLS2 = 0; // gate 3, logic 0
     CLC3GLS3 = 0; // gate 4, logic 0

@@ -35,8 +35,8 @@ void main( void )
     // high-speed oscillator, which defaults to 1MHz.
     OSCCON |= 0b01110000; // set IRFC<2:0> for 16MHz F_OSC
     ANSELHbits.ANS11 = 0; // enable digital buffer on RB5
-	TRISB = 0b10011111; // RB5, RB6 output
-	LATB = 0;
+    TRISB = 0b10011111; // RB5, RB6 output
+    LATB = 0;
     __delay_ms(5);
     
     // 50 microseconds = 200 instruction cycles @ F_OSC = 16 MHz
