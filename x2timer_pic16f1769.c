@@ -8,6 +8,7 @@
 // 2018-01-30 start this firmware for PIC16F1778-I/SP.
 // 2018-02-02 mode 1 complete with save/restore registers.
 // 2019-02-19 port to PIC16F1769
+// 2019-02-21 modes 3 and 4 available
 //
 // Build with XC8 v2.05 C90 standard 
 // because the C99 project option seems to result in 
@@ -31,7 +32,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.4 2019-02-21 PJ&PC";
+const char * version_string = "Version 0.5 2019-02-21 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -238,8 +239,46 @@ void trigger_simple_hardware(void)
 void trigger_delayed_firmware(void)
 {
     // Trigger from comparator 1.
-    // Output 1 immediate, output 2 fixed delay. 
-    
+    // Output 1 immediate, output 2 fixed delay.
+    //
+    uint16_t cmp_count = vregister[3];
+    int nchar;
+    //
+    // Leave RC4 and RC5 controlled by their latch.
+    LATC &= 0b11001111;
+    // Set up Timer1, driven by 8MHz (FOSC/4) instruction clock.
+    T1CONbits.ON = 0;
+    T1CONbits.CS = 0b00;
+    T1CONbits.CKPS = 0b00; // Prescale of 1.
+    T1GCONbits.GE = 0; // Timer is always counting, once on.
+    TMR1 = 0;
+    PIR1bits.TMR1IF = 0;
+    // Set up Compare module, looking at Timer1.
+    CCP1CONbits.MODE = 0b1000; // Compare mode, set output on match.
+    CCPR1 = cmp_count;
+    PIR1bits.CCP1IF = 0;
+    LED_ARM = 1;
+    // Wait for comparator 1 to go high.
+    while (!CMOUTbits.MC1OUT) { CLRWDT(); }
+    LATC |= 0b00100000; // RC5 is immediate output.
+    CCP1CONbits.EN = 1;
+    T1CONbits.ON = 1;
+    if (cmp_count == 0) {
+        // We have no delay; proceed to signal immediately.
+    } else {
+        // Wait for compare match with timer.
+        while (!CCP1CONbits.OUT) { CLRWDT(); }
+    }
+    // We have waited the appointed time.
+    LATC |= 0b00010000; // RC4 is delayed output.
+    //
+    // Our work is done, so we now clean up at a leisurely pace.
+    T1CONbits.ON = 0;
+    CCP1CONbits.EN = 0;
+    CCP1CONbits.MODE = 0;
+    __delay_ms(500);
+    LATC &= 0b11001111;
+    LED_ARM = 0;    
 } // end trigger_delayed_firmware()
 
 void trigger_measured_delay(void)
