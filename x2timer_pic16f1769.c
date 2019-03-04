@@ -9,6 +9,7 @@
 // 2018-02-02 mode 1 complete with save/restore registers.
 // 2019-02-19 port to PIC16F1769
 // 2019-02-21 modes 3 and 4 available
+// 2019-03-04 mode 5 measured-delay-using-hardware
 //
 // Build with XC8 v2.05 C90 standard 
 // because the C99 project option seems to result in 
@@ -32,7 +33,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.6 2019-02-22 PJ&PC";
+const char * version_string = "Version 0.7 2019-03-04 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -79,8 +80,9 @@ void init_peripherals()
     // Initializing the UART sets pins RA2,RC0,RB5,RB7.
     uart1_init(38400);
     //
-    // Pins RB7,RC4,RC5,RC6,RC7 are digital-outputs.
+    // Pins RB7,RC3,RC4,RC5,RC6,RC7 are digital-outputs.
     TRISBbits.TRISB7 = 0; ANSELBbits.ANSB7 = 0; LATBbits.LATB7 = 0;
+    TRISCbits.TRISC3 = 0; ANSELCbits.ANSC3 = 0; LATCbits.LATC3 = 0;
     TRISCbits.TRISC4 = 0; LATCbits.LATC4 = 0;
     TRISCbits.TRISC5 = 0; LATCbits.LATC5 = 0;
     // We also want the high-current drive enabled on RC4 and RC5.
@@ -333,6 +335,149 @@ void trigger_measured_delay(void)
     nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
 } // end trigger_measured_delay()
 
+void measured_delay_using_hardware(void)
+{
+    // Start timing on comparator 1.
+    // Output 1 immediate, to indicate gating of Timer3.
+    // Stop Timer3 on comparator 2 and, simultaneously, start Timer1.
+    // Output 2 (CCP1_out) after measured time plus extra delay on Timer1.
+    //
+    // Use core-independent peripheral devices to gate Timers
+    // so that we do not have the latencies associated with 
+    // MCU while loops.
+    //
+    uint16_t extra_delay = vregister[3];
+    uint16_t tmr_count, cmp_count;
+    int nchar;
+    //
+    // Outputs RC3, RC4 and RC5 will be controlled by peripheral devices
+    // for the main event but, before and after that, set to zero.
+    LATC &= 0b11000111;
+    //
+    GIE = 0; PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 0;
+    // Timers will be gated by pin signals.
+    T1GPPS = 0b10011; // RC3
+    T3GPPS = 0b10101; // RC5
+    // Steer the output signals to the MCU pins.
+    RC3PPS = 0b00010; // LC2_out
+    RC4PPS = 0b01100; // CPP1_out
+    RC5PPS = 0b00011; // LC3_out
+    PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
+    //
+    // Set up CLC2 to extend the Comparator 2 pulse.
+    // This should be the fastest response to an event.
+    CLC2CONbits.EN = 0;
+    CLC2CONbits.MODE = 0b100; // D flip-flop
+    CLC2POLbits.POL = 0; // not inverted
+    CLC2SEL0bits.D1S = 0b001000; // sync_C2OUT as data1 for clock
+    CLC2SEL1bits.D2S = 0; // none (CLCIN0 via PPS, but is ignored)
+    CLC2SEL2bits.D3S = 0; // none
+    CLC2SEL3bits.D4S = 0; // none
+    CLC2GLS0 = 0b00000010; // gate 1, send data1-true through
+    CLC2GLS1 = 0; // gate 2, logic 0
+    CLC2GLS2 = 0; // gate 3, logic 0
+    CLC2GLS3 = 0; // gate 4, logic 0
+    CLC2POLbits.G1POL = 0; 
+    CLC2POLbits.G2POL = 1; // invert logic 0 to get logic 1
+    CLC2POLbits.G3POL = 0;
+    CLC2POLbits.G4POL = 0;
+    //
+    // Set up CLC3 to extend the Comparator 1 pulse,
+    // until CLC2 resets it.
+    CLC3CONbits.EN = 0;
+    CLC3CONbits.MODE = 0b100; // D flip-flop
+    CLC3POLbits.POL = 0; // not inverted
+    CLC3SEL0bits.D1S = 0b000111; // sync_C1OUT as data1 for clock
+    CLC3SEL1bits.D2S = 0; // none (CLCIN0 via PPS, but is ignored)
+    CLC3SEL2bits.D3S = 0b000101; // LC2_out from CLC2 as data3 for reset
+    CLC3SEL3bits.D4S = 0; // none
+    CLC3GLS0 = 0b00000010; // gate 1, send data1-true through
+    CLC3GLS1 = 0; // gate 2, logic 0
+    CLC3GLS2 = 0b00100000; // gate 3, send data3-true through
+    CLC3GLS3 = 0; // gate 4, logic 0
+    CLC3POLbits.G1POL = 0; 
+    CLC3POLbits.G2POL = 1; // invert logic 0 to get logic 1
+    CLC3POLbits.G3POL = 0;
+    CLC3POLbits.G4POL = 0;
+    //
+    CLC2CONbits.EN = 1;
+    CLC3CONbits.EN = 1;
+    //
+    // Set up Timer3 to record time of flight between comparators.
+    T3CONbits.ON = 0;
+    T3CONbits.CS = 0b00; // driven by 8MHz (FOSC/4) instruction clock.
+    T3CONbits.CKPS = 0b00; // Prescale of 1.
+    T3GCONbits.GE = 1; // Timer3 is gated by hardware.
+    T3GCONbits.GPOL = 1; // counts while gate is high
+    T3GCONbits.GTM = 0; // disable gate toggle mode
+    T3GCONbits.GSPM = 0; // disable single-pulse mode
+    T3GCONbits.GSS = 0b00; // look to gate pin
+    TMR3 = 0;
+    PIR4bits.TMR3IF = 0;
+    T3CONbits.ON = 1;
+    // Timer3 should now be ready to count ticks 
+    // between the comparator events.
+    //
+    // Timer1 will set the waiting period by starting to count
+    // once LC2_out goes high.
+    T1CONbits.ON = 0;
+    T1CONbits.CS = 0b00;
+    T1CONbits.CKPS = 0b00; // Prescale of 1.
+    T1GCONbits.GE = 1; // Timer1 is gated by hardware.
+    T1GCONbits.GPOL = 1; // counts while gate is high
+    T1GCONbits.GTM = 0; // disable gate toggle mode
+    T1GCONbits.GSPM = 0; // disable single-pulse mode
+    T1GCONbits.GSS = 0b00; // look to gate pin
+    TMR1 = 0;
+    PIR1bits.TMR1IF = 0;
+    T1CONbits.ON = 1;
+    //
+    // Set up Compare module, looking at Timer1.
+    CCP1CONbits.MODE = 0b1000; // Compare mode, set output on match.
+    PIR1bits.CCP1IF = 0;
+    //
+    LED_ARM = 1;
+    // At this point, the hardware is all set to monitor
+    // the comparator signals, not much else to do but wait
+    // for the time of shock to be available .
+    //
+    // Wait for comparator 2 (stretched by LC2_out) to go high, event B.
+    while (!CLC2CONbits.OUT) { CLRWDT(); }
+    tmr_count = TMR3;
+    // LC2_out going high should have started Timer1 counting.
+    // We should set up the compare value, assuming that 
+    // the time to go is roughly equal to the time
+    // between events A and B.
+    cmp_count = tmr_count + extra_delay;
+    // [TODO] Check that we don't overflow.
+    // This should not be a real problem for the cases that interest us.
+    // A period of 50us between events A, B should give a count of 400.
+    CCPR1 = cmp_count;
+    CCP1CONbits.EN = 1;
+    while (!CCP1CONbits.OUT) { CLRWDT(); }
+    //
+    // At this point CCP1_out will have appeared on RC4.
+    // Our work is done, so we now clean up at a leisurely pace.
+    while (!CCP1CONbits.OUT) { CLRWDT(); }
+    __delay_ms(500);
+    // End of output pulse; clean up by steering
+    // the original data latch values to pins.
+    GIE = 0; PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 0;
+    RC3PPS = 0; // Return control to LATC3
+    RC4PPS = 0; // Return control to LATC4
+    RC5PPS = 0; // Return control to LATC5
+    PPSLOCK = 0x55; PPSLOCK = 0xaa; PPSLOCKED = 1;
+    CLC3CONbits.EN = 0; // Disable flip-flop
+    CLC2CONbits.EN = 0; // Disable flip-flop
+    T3CONbits.ON = 0;
+    T1CONbits.ON = 0;
+    CCP1CONbits.EN = 0;
+    CCP1CONbits.MODE = 0;
+    LATC &= 0b11000111;
+    LED_ARM = 0;
+    nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
+} // end measured_delay_using_hardware()
+
 void arm_and_wait_for_event(void)
 {
     int nchar;
@@ -370,7 +515,24 @@ void arm_and_wait_for_event(void)
                 printf("C1OUT already high. fail");
                 break;
             }
+            if (CMOUTbits.MC2OUT) {
+                printf("C2OUT already high. fail");
+                break;
+            }
             trigger_measured_delay();
+            nchar = printf("triggered. ok");
+            break;
+        case 5:
+            nchar = printf("armed mode 5, measured delay using hardware. ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            if (CMOUTbits.MC2OUT) {
+                printf("C2OUT already high. fail");
+                break;
+            }
+            measured_delay_using_hardware();
             nchar = printf("triggered. ok");
             break;
         default:
