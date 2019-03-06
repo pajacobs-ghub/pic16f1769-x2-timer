@@ -31,7 +31,10 @@ Register    Description
               1  simple trigger firmware, both outputs immediate
               2  simple trigger hardware, both outputs immediate
               3  delayed trigger, one output immediate, one delayed
-              4  measured delay, one output immediate, one delayed
+              4  measured delay (firmware control),
+                 one output immediate, one delayed
+              5  measured delay (hardware control), 
+                 one output immediate (gating of timer), one delayed
 1           trigger level 1 as a 10-bit count, 0-1023
 2           trigger level 2 as a 10-bit count, 0-1023
 3           delay as a 16-bit count
