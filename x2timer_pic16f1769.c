@@ -10,6 +10,7 @@
 // 2019-02-19 port to PIC16F1769
 // 2019-02-21 modes 3 and 4 available
 // 2019-03-04 mode 5 measured-delay-using-hardware
+// 2019-03-11 mode 6: mode 4, but accounts for desired distance from tube end.
 //
 // Build with XC8 v2.05 C90 standard 
 // because the C99 project option seems to result in 
@@ -33,7 +34,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.7 2019-03-04 PJ&PC";
+const char * version_string = "Version 0.8 2019-03-11 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -478,6 +479,64 @@ void measured_delay_using_hardware(void)
     nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
 } // end measured_delay_using_hardware()
 
+
+void trigger_measured_extra_delay(void)
+{
+    // Start timing on comparator 1.
+    // Output 1 immediate.
+    // Stop timing on comparator 2.
+    // Output 2 after computed delay, based on geometry of tube/optical system
+    // Use MCU to monitor and control the state of bits.
+    //
+    uint16_t tmr_count, cmp_count;
+    int nchar;
+    
+    // Leave RC4 and RC5 controlled by their latch.
+    LATC &= 0b11001111;
+    // Set up Timer1, driven by 8MHz (FOSC/4) instruction clock.
+    T1CONbits.ON = 0;
+    T1CONbits.CS = 0b00;
+    T1CONbits.CKPS = 0b00; // Prescale of 1.
+    T1GCONbits.GE = 0; // Timer is always counting, once on.
+    TMR1 = 0;
+    PIR1bits.TMR1IF = 0;
+    // Set up Compare module, looking at Timer1.
+    CCP1CONbits.MODE = 0b1000; // Compare mode, set output on match.
+    PIR1bits.CCP1IF = 0;
+    LED_ARM = 1;
+    // Wait for comparator 1 to go high, event A.
+    while (!CMOUTbits.MC1OUT) { CLRWDT(); }
+    T1CONbits.ON = 1;
+    LATC |= 0b00100000; // RC5 is immediate output.
+    // With timer counting, wait for event B.
+    while (!CMOUTbits.MC2OUT) { CLRWDT(); }
+    tmr_count = TMR1;
+    // Leave the timer counting and set up the compare value,
+    // assuming that centre of the optics are at about 10% of the sensor separation.
+    cmp_count = (tmr_count << 1) + (tmr_count >> 3);
+    
+    // [TODO] Check that we don't overflow.
+    // This should not be a real problem for the cases that interest us.
+    // A period of 50us between events A, B should give a first count of 400.
+    // Doubling that and adding a bit should be OK.
+    CCPR1 = cmp_count;
+    CCP1CONbits.EN = 1;
+    while (!CCP1CONbits.OUT) { CLRWDT(); }
+    // We have waited the appointed time.
+    LATC |= 0b00010000; // RC4 is delayed output.
+    //
+    // Our work is done, so we now clean up at a leisurely pace.
+    T1CONbits.ON = 0;
+    CCP1CONbits.EN = 0;
+    CCP1CONbits.MODE = 0;
+    __delay_ms(500);
+    LATC &= 0b11001111;
+    LED_ARM = 0;
+    
+    nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
+} // end trigger_measured_extra_delay()
+
+
 void arm_and_wait_for_event(void)
 {
     int nchar;
@@ -533,6 +592,19 @@ void arm_and_wait_for_event(void)
                 break;
             }
             measured_delay_using_hardware();
+            nchar = printf("triggered. ok");
+            break;
+		 case 6:
+            nchar = printf("armed mode 6, one output immediate, one measured with length offset. ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            if (CMOUTbits.MC2OUT) {
+                printf("C2OUT already high. fail");
+                break;
+            }
+            trigger_measured_extra_delay();
             nchar = printf("triggered. ok");
             break;
         default:
