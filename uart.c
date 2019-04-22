@@ -64,6 +64,11 @@ void putch(char data)
 
 __bit kbhit(void)
 // Returns true is a character is waiting in the receive buffer.
+//
+// Note that this will not work with our hardware RTS/CTS, unless
+// we allow the characters come through for a sufficient length of time.
+// Will probably have to discard them, to save confusion in getch.
+// For a fix, see the code in pic16f18426-pressure-logger.
 {
     return (PIR1bits.RCIF);
 }
