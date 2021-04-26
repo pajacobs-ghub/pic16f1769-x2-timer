@@ -1,11 +1,13 @@
-PIC16F1769-I/P x2-timer commands and registers
+PIC16F1769-I/P x2-trigger+timer commands and registers
 
 
 Command     Action
 ------------------------------------------------------------------
 v           report version of firmware
+h or ?      print the help message
 
 n           report number of registers
+p           report register values
 r <i>       report value of register i
 s <i> <j>   set register i to integer value j
 R           restore register values from HEFlash
@@ -28,15 +30,19 @@ c <i>       convert analogue channel i
 Register    Description
 ------------------------------------------------------------------
 0           trigger mode
-              1  simple trigger firmware, both outputs immediate
-              2  simple trigger hardware, both outputs immediate
+              1  simple trigger (firmware), both outputs immediate
+              2  simple trigger (hardware), both outputs immediate
               3  delayed trigger, one output immediate, one delayed
               4  measured delay (firmware control),
-                 one output immediate, one delayed
+                 output a immediate, b delayed
               5  measured delay (hardware control), 
-                 one output immediate (gating of timer), one delayed
-1           trigger level 1 as a 10-bit count, 0-1023
-2           trigger level 2 as a 10-bit count, 0-1023
-3           delay as a 16-bit count
+                 output a immediate (gating of timer), b delayed
+              6  measured delay for Oxford tunnel, 
+                 output a immediate (gating of timer), b delayed
+              7  measured delay for X2 tunnel, 
+                 output a immediate (gating of timer), b delayed
+1           trigger level a as a 10-bit count, 0-1023
+2           trigger level b as a 10-bit count, 0-1023
+3           (extra) delay as a 16-bit count
 ------------------------------------------------------------------
 

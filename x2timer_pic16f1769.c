@@ -11,10 +11,12 @@
 // 2019-02-21 modes 3 and 4 available
 // 2019-03-04 mode 5 measured-delay-using-hardware
 // 2019-03-11 mode 6: mode 4, but accounts for desired distance from tube end.
+// 2021-04-26 Refresh for UQ X2 use.
 //
 // Build with XC8 v2.05 C90 standard 
 // because the C99 project option seems to result in 
 // unresolved dependencies.
+// 2021-04-26 XC8 v2.31 C90 also seems to work.
 // 
 //
 #include <xc.h>
@@ -34,7 +36,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.8 2019-03-11 PJ&PC";
+const char * version_string = "Version 0.9 2021-04-26 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -240,7 +242,7 @@ void trigger_delayed_firmware(void)
     // Trigger from comparator 1.
     // Output 1 immediate, output 2 fixed delay.
     //
-    uint16_t cmp_count = vregister[3];
+    uint16_t cmp_count = (uint16_t) vregister[3];
     int nchar;
     //
     // Leave RC4 and RC5 controlled by their latch.
@@ -288,7 +290,7 @@ void trigger_measured_delay(void)
     // Output 2 after computed delay plus fixed delay.
     // Use MCU to monitor and control the state of bits.
     //
-    uint16_t extra_delay = vregister[3];
+    uint16_t extra_delay = (uint16_t) vregister[3];
     uint16_t tmr_count, cmp_count;
     int nchar;
     //
@@ -347,7 +349,7 @@ void measured_delay_using_hardware(void)
     // so that we do not have the latencies associated with 
     // MCU while loops.
     //
-    uint16_t extra_delay = vregister[3];
+    uint16_t extra_delay = (uint16_t) vregister[3];
     uint16_t tmr_count, cmp_count;
     int nchar;
     //
@@ -480,12 +482,13 @@ void measured_delay_using_hardware(void)
 } // end measured_delay_using_hardware()
 
 
-void trigger_measured_extra_delay(void)
+void trigger_measured_extra_delay_oxford(void)
 {
     // Start timing on comparator 1.
     // Output 1 immediate.
     // Stop timing on comparator 2.
-    // Output 2 after computed delay, based on geometry of tube/optical system
+    // Output 2 after computed delay,
+    // based on geometry of Oxford tube/optical system.
     // Use MCU to monitor and control the state of bits.
     //
     uint16_t tmr_count, cmp_count;
@@ -534,7 +537,70 @@ void trigger_measured_extra_delay(void)
     LED_ARM = 0;
     
     nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
-} // end trigger_measured_extra_delay()
+} // end trigger_measured_extra_delay_oxford()
+
+
+void trigger_measured_extra_delay_x2(void)
+{
+    // Start timing on comparator 1.
+    // Output 1 immediate.
+    // Stop timing on comparator 2.
+    // Output 2 after computed delay, based on geometry of X2 tube and nozzle.
+    // Measure AT4-AT7 (0.568m) test-model 1.863m after AT7.
+    // We want count to be 3.28 times measured count but we settle for
+    // 3.25 (2+1+1/4) as the scale factor.
+    // Use MCU to monitor and control the state of bits.
+    //
+    uint16_t tmr_count, cmp_count;
+    uint16_t extra_delay = (uint16_t) vregister[3];
+    int nchar;
+    
+    // Leave RC4 and RC5 controlled by their latch.
+    LATC &= 0b11001111;
+    // Set up Timer1, driven by 8MHz (FOSC/4) instruction clock.
+    T1CONbits.ON = 0;
+    T1CONbits.CS = 0b00;
+    T1CONbits.CKPS = 0b00; // Prescale of 1.
+    T1GCONbits.GE = 0; // Timer is always counting, once on.
+    TMR1 = 0;
+    PIR1bits.TMR1IF = 0;
+    // Set up Compare module, looking at Timer1.
+    CCP1CONbits.MODE = 0b1000; // Compare mode, set output on match.
+    PIR1bits.CCP1IF = 0;
+    LED_ARM = 1;
+    // Wait for comparator 1 to go high, event A.
+    while (!CMOUTbits.MC1OUT) { CLRWDT(); }
+    T1CONbits.ON = 1;
+    LATC |= 0b00100000; // RC5 is immediate output.
+    // With timer counting, wait for event B.
+    while (!CMOUTbits.MC2OUT) { CLRWDT(); }
+    tmr_count = TMR1;
+    // Leave the timer counting and set up the compare value,
+    // to be a factor of 3.25.
+    cmp_count = (tmr_count << 1) + tmr_count + (tmr_count >> 2) + extra_delay;
+    
+    // [TODO] Check that we don't overflow.
+    // This should not be a real problem for the cases that interest us.
+    // At 9km/s, we expect a period of 63.1us between events A, B.
+    // This should give a first count of 505.
+    // Scaling by 3.25 that and adding a bit should be OK for a 16-bit int.
+    CCPR1 = cmp_count;
+    CCP1CONbits.EN = 1;
+    while (!CCP1CONbits.OUT) { CLRWDT(); }
+    // We have waited the appointed time.
+    LATC |= 0b00010000; // RC4 is delayed output.
+    //
+    // Our work is done, so we now clean up at a leisurely pace.
+    T1CONbits.ON = 0;
+    CCP1CONbits.EN = 0;
+    CCP1CONbits.MODE = 0;
+    __delay_ms(500);
+    LATC &= 0b11001111;
+    LED_ARM = 0;
+    
+    nchar = printf("\r\ntmr_count=%d cmp_count=%d extra_delay=%d\r\n",
+                   tmr_count, cmp_count, extra_delay);
+} // end trigger_measured_extra_delay_x2()
 
 
 void arm_and_wait_for_event(void)
@@ -595,7 +661,7 @@ void arm_and_wait_for_event(void)
             nchar = printf("triggered. ok");
             break;
 		 case 6:
-            nchar = printf("armed mode 6, one output immediate, one measured with length offset. ");
+            nchar = printf("armed mode 6, one output immediate, one measured (Oxford optics). ");
             if (CMOUTbits.MC1OUT) {
                 printf("C1OUT already high. fail");
                 break;
@@ -604,7 +670,20 @@ void arm_and_wait_for_event(void)
                 printf("C2OUT already high. fail");
                 break;
             }
-            trigger_measured_extra_delay();
+            trigger_measured_extra_delay_oxford();
+            nchar = printf("triggered. ok");
+            break;
+		 case 7:
+            nchar = printf("armed mode 7, one output immediate, one measured (X2). ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            if (CMOUTbits.MC2OUT) {
+                printf("C2OUT already high. fail");
+                break;
+            }
+            trigger_measured_extra_delay_x2();
             nchar = printf("triggered. ok");
             break;
         default:
@@ -641,6 +720,13 @@ void interpret_command()
             break;
         case 'n':
             nchar = printf("%u ok", NUMREG);
+            break;
+        case 'p':
+            nchar = printf("\r\nRegister values:");
+            for (i=0; i < NUMREG; ++i) {
+                nchar = printf("\r\nreg[%d]=%d", i, vregister[i]);
+            }
+            nchar = printf("\r\nok");
             break;
         case 'r':
             // Report a register value.
@@ -723,6 +809,41 @@ void interpret_command()
             } else {
                 nchar = printf("fail");
             }
+            break;
+        case 'h':
+        case '?':
+            nchar = printf("\r\nPIC16F1769-I/P X2-trigger+timer commands and registers");
+            nchar = printf("\r\n");
+            nchar = printf("\r\nCommands:");
+            nchar = printf("\r\n h or ? print this help message");
+            nchar = printf("\r\n v      report version of firmware");
+            nchar = printf("\r\n n      report number of registers");
+            nchar = printf("\r\n p      report register values");
+            nchar = printf("\r\n r <i>  report value of register i");
+            nchar = printf("\r\n s <i> <j>  set register i to value j");
+            nchar = printf("\r\n R      restore register values from HEFlash");
+            nchar = printf("\r\n S      save register values to HEFlash");
+            nchar = printf("\r\n F      set register values to original values");
+            nchar = printf("\r\n a      arm device and wait for event");
+            nchar = printf("\r\n m      wait for manual arm button press");
+            nchar = printf("\r\n c <i>  convert analogue channel i");
+            nchar = printf("\r\n        i=30 DAC1_output");
+            nchar = printf("\r\n        i=28 DAC2_output");
+            nchar = printf("\r\n        i=5  RC1/AN5/C1IN1- (IN a)");
+            nchar = printf("\r\n        i=6  RC2/AN6/C2IN2- (IN b)");
+            nchar = printf("\r\n");
+            nchar = printf("\r\nRegisters:");
+            nchar = printf("\r\n 0  mode: 1= simple trigger (firmware), both outputs immediate");
+            nchar = printf("\r\n          2= simple trigger (hardware), both outputs immediate");
+            nchar = printf("\r\n          3= delayed trigger, output a immediate, b delayed");
+            nchar = printf("\r\n          4= measured delay (firmware), output a immediate, b delayed");
+            nchar = printf("\r\n          5= measured delay (hardware), output a immediate, b delayed");
+            nchar = printf("\r\n          6= measured delay for Oxford tunnel, output a immediate, b delayed");
+            nchar = printf("\r\n          7= measured delay for X2 tunnel, output a immediate, b delayed");
+            nchar = printf("\r\n 1  trigger level a as a 10-bit count, 0-1023");
+            nchar = printf("\r\n 2  trigger level b as a 10-bit count, 0-1023");
+            nchar = printf("\r\n 3  (extra) delay as 16-bit count (8 ticks per us)");
+            nchar = printf("\r\nok");
             break;
         default:
             nchar = printf("fail");

@@ -18,7 +18,7 @@
 char HEFLASH_writeBlock( char radd, char* data, char count)
 {
     // 1. obtain absolute address in HE FLASH row
-    unsigned add = radd * FLASH_ROWSIZE + HEFLASH_START;
+    unsigned add = (unsigned) (radd * FLASH_ROWSIZE + HEFLASH_START);
 
     // 2. check input parameters
     if ( ( count > FLASH_ROWSIZE) || (radd >= HEFLASH_MAXROWS))
@@ -50,7 +50,7 @@ char HEFLASH_writeBlock( char radd, char* data, char count)
 char HEFLASH_readBlock( char *buffer, char radd, char count)
 {
     // 1. obtain absolute address in HE FLASH row
-    unsigned add = radd * FLASH_ROWSIZE + HEFLASH_START;
+    unsigned add = (unsigned) (radd * FLASH_ROWSIZE + HEFLASH_START);
 
     // 2. check input parameters
     if ( ( count > FLASH_ROWSIZE) || (radd >= HEFLASH_MAXROWS))
@@ -71,7 +71,7 @@ char HEFLASH_readBlock( char *buffer, char radd, char count)
 char HEFLASH_readByte( char radd, char offset)
 {
     // 1. add offset into HE Flash memory
-    unsigned add = radd * FLASH_ROWSIZE + HEFLASH_START + offset;
+    unsigned add = (unsigned) (radd * FLASH_ROWSIZE + HEFLASH_START + offset);
 
     // 2. read content
     return (char) FLASH_read( add);
