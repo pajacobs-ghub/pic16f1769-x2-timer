@@ -12,11 +12,14 @@
 // 2019-03-04 mode 5 measured-delay-using-hardware
 // 2019-03-11 mode 6: mode 4, but accounts for desired distance from tube end.
 // 2021-04-26 Refresh for UQ X2 use.
+// 2021-05-25 Update delay calculation for X2 geometry.
 //
 // Build with XC8 v2.05 C90 standard 
 // because the C99 project option seems to result in 
 // unresolved dependencies.
 // 2021-04-26 XC8 v2.31 C90 also seems to work.
+// 2021-05-25 XC8 v2.32 C90 builds ok but the device header
+//   comes from the pack PIC12-16F1xxx_DFP,1.2.63
 // 
 //
 #include <xc.h>
@@ -36,7 +39,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.9 2021-04-26 PJ&PC";
+const char * version_string = "Version 0.10 2021-05-25 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -547,8 +550,8 @@ void trigger_measured_extra_delay_x2(void)
     // Stop timing on comparator 2.
     // Output 2 after computed delay, based on geometry of X2 tube and nozzle.
     // Measure AT4-AT7 (0.568m) test-model 1.863m after AT7.
-    // We want count to be 3.28 times measured count but we settle for
-    // 3.25 (2+1+1/4) as the scale factor.
+    // We want final count to be 4.28 times measured count but we settle for
+    // 4.25 (4+1/4) as the scale factor.
     // Use MCU to monitor and control the state of bits.
     //
     uint16_t tmr_count, cmp_count;
@@ -571,24 +574,25 @@ void trigger_measured_extra_delay_x2(void)
     // Wait for comparator 1 to go high, event A.
     while (!CMOUTbits.MC1OUT) { CLRWDT(); }
     T1CONbits.ON = 1;
-    LATC |= 0b00100000; // RC5 is immediate output.
+    LATC |= 0b00100000; // RC5 is immediate output (outA).
+    LED_ARM = 0; // Indicate that the event A has happened.
     // With timer counting, wait for event B.
     while (!CMOUTbits.MC2OUT) { CLRWDT(); }
     tmr_count = TMR1;
     // Leave the timer counting and set up the compare value,
-    // to be a factor of 3.25.
-    cmp_count = (tmr_count << 1) + tmr_count + (tmr_count >> 2) + extra_delay;
+    // to be a factor of 4.25.
+    cmp_count = (tmr_count << 2) + (tmr_count >> 2) + extra_delay;
     
     // [TODO] Check that we don't overflow.
     // This should not be a real problem for the cases that interest us.
     // At 9km/s, we expect a period of 63.1us between events A, B.
     // This should give a first count of 505.
-    // Scaling by 3.25 that and adding a bit should be OK for a 16-bit int.
+    // Scaling that by 4.25 and adding a bit should be OK for a 16-bit int.
     CCPR1 = cmp_count;
     CCP1CONbits.EN = 1;
     while (!CCP1CONbits.OUT) { CLRWDT(); }
     // We have waited the appointed time.
-    LATC |= 0b00010000; // RC4 is delayed output.
+    LATC |= 0b00010000; // RC4 is delayed output (outB).
     //
     // Our work is done, so we now clean up at a leisurely pace.
     T1CONbits.ON = 0;
@@ -596,7 +600,6 @@ void trigger_measured_extra_delay_x2(void)
     CCP1CONbits.MODE = 0;
     __delay_ms(500);
     LATC &= 0b11001111;
-    LED_ARM = 0;
     
     nchar = printf("\r\ntmr_count=%d cmp_count=%d extra_delay=%d\r\n",
                    tmr_count, cmp_count, extra_delay);
