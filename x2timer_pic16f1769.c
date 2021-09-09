@@ -13,6 +13,7 @@
 // 2019-03-11 mode 6: mode 4, but accounts for desired distance from tube end.
 // 2021-04-26 Refresh for UQ X2 use.
 // 2021-05-25 Update delay calculation for X2 geometry.
+// 2021-09-09 Add delay calculation for X3 expansion tube.
 //
 // Build with XC8 v2.05 C90 standard 
 // because the C99 project option seems to result in 
@@ -39,7 +40,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.10 2021-05-25 PJ&PC";
+const char * version_string = "Version 0.11 2021-09-09 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -543,8 +544,9 @@ void trigger_measured_extra_delay_oxford(void)
 } // end trigger_measured_extra_delay_oxford()
 
 
-void trigger_measured_extra_delay_x2(void)
+void trigger_measured_extra_delay_x2x3(void)
 {
+    // Modes 7 (X2), 8 (X3).
     // Start timing on comparator 1.
     // Output 1 immediate.
     // Stop timing on comparator 2.
@@ -554,6 +556,7 @@ void trigger_measured_extra_delay_x2(void)
     // 4.25 (4+1/4) as the scale factor.
     // Use MCU to monitor and control the state of bits.
     //
+    uint16_t operating_mode = (uint16_t) vregister[0];
     uint16_t tmr_count, cmp_count;
     uint16_t extra_delay = (uint16_t) vregister[3];
     int nchar;
@@ -579,15 +582,23 @@ void trigger_measured_extra_delay_x2(void)
     // With timer counting, wait for event B.
     while (!CMOUTbits.MC2OUT) { CLRWDT(); }
     tmr_count = TMR1;
-    // Leave the timer counting and set up the compare value,
-    // to be a factor of 4.25.
-    cmp_count = (tmr_count << 2) + (tmr_count >> 2) + extra_delay;
-    
+    // Leave the timer counting and set up the compare value.
+    if (operating_mode == 7) {
+        // For X2 AT4-AT7, set to be a factor of 4.25 time the measured value.
+        cmp_count = (tmr_count << 2) + (tmr_count >> 2) + extra_delay;
+    } else {
+        // For X3 AT6-AT7, set to be 3.4375 (2+1+1/4+1/8+1/16).
+        // At 8km/s shock speed, we have about 680 microseconds to do
+        // the calculation.
+        cmp_count = (tmr_count << 1) + tmr_count + (tmr_count >> 2) +
+                (tmr_count >> 3) + (tmr_count >> 4) + extra_delay;
+    }
     // [TODO] Check that we don't overflow.
-    // This should not be a real problem for the cases that interest us.
-    // At 9km/s, we expect a period of 63.1us between events A, B.
+    // This should not be a real problem for the cases that interests us.
+    // In X2, at 9km/s, we expect a period of 63.1us between events A, B.
     // This should give a first count of 505.
     // Scaling that by 4.25 and adding a bit should be OK for a 16-bit int.
+    // In X3, at 8km/s, we expect first count of 1600 and a final count of 5500.
     CCPR1 = cmp_count;
     CCP1CONbits.EN = 1;
     while (!CCP1CONbits.OUT) { CLRWDT(); }
@@ -603,7 +614,7 @@ void trigger_measured_extra_delay_x2(void)
     
     nchar = printf("\r\ntmr_count=%d cmp_count=%d extra_delay=%d\r\n",
                    tmr_count, cmp_count, extra_delay);
-} // end trigger_measured_extra_delay_x2()
+} // end trigger_measured_extra_delay_x2x3()
 
 
 void arm_and_wait_for_event(void)
@@ -686,7 +697,20 @@ void arm_and_wait_for_event(void)
                 printf("C2OUT already high. fail");
                 break;
             }
-            trigger_measured_extra_delay_x2();
+            trigger_measured_extra_delay_x2x3();
+            nchar = printf("triggered. ok");
+            break;
+		 case 8:
+            nchar = printf("armed mode 8, one output immediate, one measured (X3). ");
+            if (CMOUTbits.MC1OUT) {
+                printf("C1OUT already high. fail");
+                break;
+            }
+            if (CMOUTbits.MC2OUT) {
+                printf("C2OUT already high. fail");
+                break;
+            }
+            trigger_measured_extra_delay_x2x3();
             nchar = printf("triggered. ok");
             break;
         default:
@@ -815,7 +839,7 @@ void interpret_command()
             break;
         case 'h':
         case '?':
-            nchar = printf("\r\nPIC16F1769-I/P X2-trigger+timer commands and registers");
+            nchar = printf("\r\nPIC16F1769-I/P X2-X3-trigger+timer commands and registers");
             nchar = printf("\r\n");
             nchar = printf("\r\nCommands:");
             nchar = printf("\r\n h or ? print this help message");
@@ -842,7 +866,8 @@ void interpret_command()
             nchar = printf("\r\n          4= measured delay (firmware), output a immediate, b delayed");
             nchar = printf("\r\n          5= measured delay (hardware), output a immediate, b delayed");
             nchar = printf("\r\n          6= measured delay for Oxford tunnel, output a immediate, b delayed");
-            nchar = printf("\r\n          7= measured delay for X2 tunnel, output a immediate, b delayed");
+            nchar = printf("\r\n          7= measured delay for X2 AT4-AT7, output a AT4, b test-section");
+            nchar = printf("\r\n          8= measured delay for X3 AT6-AT7, output a AT6, b test-section");
             nchar = printf("\r\n 1  trigger level a as a 10-bit count, 0-1023");
             nchar = printf("\r\n 2  trigger level b as a 10-bit count, 0-1023");
             nchar = printf("\r\n 3  (extra) delay as 16-bit count (8 ticks per us)");
@@ -870,7 +895,7 @@ int main(void)
     update_dacs();
     //
     // Announce that the box is awake.
-    nchar = printf("\r\nX2 trigger and timer, %s.", version_string);
+    nchar = printf("\r\nX2-X3 shock-speed trigger and timer, %s.", version_string);
     //
     // The basic behaviour is to be forever checking for a text command.
     nchar = printf("\r\ncmd> ");
