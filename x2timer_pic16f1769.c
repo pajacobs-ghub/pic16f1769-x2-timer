@@ -14,7 +14,8 @@
 // 2021-04-26 Refresh for UQ X2 use.
 // 2021-05-25 Update delay calculation for X2 geometry.
 // 2021-09-09 Add delay calculation for X3 expansion tube.
-// 2024-07-20 Refresh for recent programming environment.
+// 2024-07-20 Refresh for recent programming environment,
+//            and implement 0-10V input mode for Aaron Cunningham.
 // 
 #include <xc.h>
 #pragma config FOSC = INTOSC
@@ -32,7 +33,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.12 2024-07-20 PJ&PC";
+const char * version_string = "Version 0.13 2024-07-20 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -106,9 +107,10 @@ void init_peripherals()
     __delay_ms(10);
     //
     // We want to have analog signals on pins
-    // RC1/AN5/CXIN1-, RC2/AN6/C12IN2-
+    // RC1/AN5/CXIN1-, RC2/AN6/C12IN2-, RC3/AN7/OPA2OUT
     TRISCbits.TRISC1 = 1; ANSELCbits.ANSC1 = 1; WPUCbits.WPUC1 = 0;
     TRISCbits.TRISC2 = 1; ANSELCbits.ANSC2 = 1; WPUCbits.WPUC2 = 0;
+    TRISCbits.TRISC3 = 1; ANSELCbits.ANSC3 = 1; WPUCbits.WPUC3 = 0;
     //
     // Analog to digital converter running on its own RC clock,
     // right-justified results.
@@ -134,6 +136,16 @@ void init_peripherals()
     DAC2REF = (uint16_t)vregister[2];
     DACLDbits.DAC2LD = 1;
     //
+    // Digital to analog converter 3 to provide 2V output.
+    DAC3CON0bits.PSS = 0b10; // FVR_buffer2
+    DAC3CON0bits.NSS = 0; // Vss
+    DAC3CON0bits.EN = 1;
+    DAC3REF = 16; // half way to 32 for this 5-bit DAC
+    // Buffer DAC3 with OPA2
+    OPA2PCHS = 0b100; // DAC3_out
+    OPA2CONbits.UG = 1; // Unity gain
+    OPA2CONbits.EN = 1;
+    //
     // Comparator 1
     CM1NSELbits.NCH = 0b001; // C1IN1-/RC1 pin
     CM1PSELbits.PCH = 0b1010; // DAC1_output
@@ -157,11 +169,11 @@ void init_peripherals()
     LED_PWR = 1;
 }
 
-void update_dacs(void)
+void update_DACs(int16_t val1, int16_t val2)
 {
-    DAC1REF = (uint16_t)vregister[1];
+    DAC1REF = (uint16_t)val1;
     DACLDbits.DAC1LD = 1;
-    DAC2REF = (uint16_t)vregister[2];
+    DAC2REF = (uint16_t)val2;
     DACLDbits.DAC2LD = 1;
 }
 
@@ -614,7 +626,25 @@ void trigger_measured_extra_delay_x2x3(void)
 void arm_and_wait_for_event(void)
 {
     int nchar;
+    uint16_t val1, val2;
     switch (vregister[0]) {
+        case 0:
+            nchar = printf("armed mode 0, differential trigger levels: ");
+            val1 = read_adc(5); val2 = read_adc(6);
+            val1 += read_adc(5); val2 += read_adc(6);
+            val1 += read_adc(5); val2 += read_adc(6);
+            val1 += read_adc(5); val2 += read_adc(6);
+            val1 /= 4; val2 /= 4;
+            nchar = printf("initial INa INb= %u %u ", val1, val2);
+            update_DACs(vregister[1]+val1, vregister[2]+val2);
+            __delay_ms(1); // Allow DACs to settle.
+            if (CMOUTbits.MC1OUT) {
+                nchar = printf("C1OUT already high. fail\n");
+                break;
+            }
+            trigger_simple_hardware();
+            nchar = printf("triggered. ok\n");
+            break;
         case 1:
             nchar = printf("armed mode 1, simple firmware, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
@@ -779,7 +809,9 @@ void interpret_command()
                         v = (int16_t) atoi(token_ptr);
                         vregister[i] = v;
                         nchar = printf("reg[%u] %d (%s) ok\n", i, v, hints[i]);
-                        if (i == 1 || i == 2) { update_dacs(); }
+                        if (i == 1 || i == 2) {
+                            update_DACs(vregister[1], vregister[2]);
+                        }
                     } else {
                         nchar = printf("fail\n");
                     }
@@ -852,9 +884,11 @@ void interpret_command()
             nchar = printf("        i=28 DAC2_output\n");
             nchar = printf("        i=5  RC1/AN5/C1IN1- (IN a)\n");
             nchar = printf("        i=6  RC2/AN6/C2IN2- (IN b)\n");
+            nchar = printf("        i=7  RC3/AN7/OPA2OUT (V2V)\n");
             nchar = printf("\n");
             nchar = printf("Registers:\n");
-            nchar = printf(" 0  mode: 1= simple trigger (firmware), both outputs immediate\n");
+            nchar = printf(" 0  mode: 0= simple trigger with differential levels\n");
+            nchar = printf("          1= simple trigger (firmware), both outputs immediate\n");
             nchar = printf("          2= simple trigger (hardware), both outputs immediate\n");
             nchar = printf("          3= delayed trigger, output a immediate, b delayed\n");
             nchar = printf("          4= measured delay (firmware), output a immediate, b delayed\n");
@@ -885,7 +919,7 @@ int main(void)
         nchar = printf("Failed to restore registers from HEF.\n");
         set_registers_to_original_values();
     }
-    update_dacs();
+    update_DACs(vregister[1], vregister[2]);
     //
     // Announce that the box is awake.
     nchar = printf("X2-X3 shock-speed trigger and timer, %s.\n", version_string);
