@@ -9,7 +9,10 @@
 #include "global_defs.h"
 #include "uart.h"
 #include <stdio.h>
-#include <conio.h>
+#include <string.h>
+
+#define MCU_RTSn LATAbits.LATA2
+#define MCU_CTSn PORTCbits.RC0
 
 void uart1_init(unsigned int baud)
 {
@@ -30,12 +33,12 @@ void uart1_init(unsigned int baud)
     TRISBbits.TRISB5 = 1; // RX is input
     ANSELBbits.ANSB5 = 0; // enable digital input
     // Hardware Flow Control
-    // Host-CTS# RA2 pin 17, MCU output
+    // MCU-RTS# (Host-CTS#) RA2 pin 17, MCU output
     ANSELAbits.ANSA2 = 0;
     TRISAbits.TRISA2 = 0;
     // Start out saying that it is not clear to send.
-    LATAbits.LATA2 = 1;
-    // Host-RTS# RC0 pin 16, MCU input
+    MCU_RTSn = 1;
+    // MCU_CTS# (Host-RTS#) RC0 pin 16, MCU input
     ANSELCbits.ANSC0 = 0;
     TRISCbits.TRISC0 = 1;
     // Use 8N1 asynchronous
@@ -62,26 +65,15 @@ void putch(char data)
     return;
 }
 
-__bit kbhit(void)
-// Returns true is a character is waiting in the receive buffer.
-//
-// Note that this will not work with our hardware RTS/CTS, unless
-// we allow the characters come through for a sufficient length of time.
-// Will probably have to discard them, to save confusion in getch.
-// For a fix, see the code in pic16f18426-pressure-logger.
-{
-    return (PIR1bits.RCIF);
-}
-
-char getch(void)
+int getch(void)
 {
     char c;
-    // Let the PC/Host know that it is clear to send.
-    LATAbits.LATA2 = 0;
+    // Request that the PC/Host send data.
+    MCU_RTSn = 0;
     // Block until a character is available in buffer.
     while (!PIR1bits.RCIF) { CLRWDT(); }
-    // Let PC/Host know that it is not clear to send.
-    LATAbits.LATA2 = 1;
+    // Let PC/Host know that it should not send data.
+    MCU_RTSn = 1;
     // Get the data that came in.
     c = RC1REG;
     // Clear possible overflow error.
@@ -90,20 +82,57 @@ char getch(void)
         NOP();
         RC1STAbits.CREN = 1;
     }
-    return c;
+    return (int)c;
 }
 
 char getche(void)
 {
-    char data = getch();
+    char data = (char)getch();
     putch(data); // echo the character
     return data;
 }
 
-void uart1_close()
+void uart1_close(void)
 {
     TX1STAbits.TXEN = 0;
     RC1STAbits.CREN = 0;
     RC1STAbits.SPEN = 0;
+    return;
+}
+
+// Convenience functions for strings.
+
+int getstr(char* buf, int nbuf)
+// Read (without echo) a line of characters into the buffer,
+// stopping when we see a return character.
+// Returns the number of characters collected,
+// excluding the terminating null char.
+{
+    int i = 0;
+    char c;
+    uint8_t done = 0;
+    while (!done) {
+        c = (char)getch();
+        if (c != '\n' && c != '\r' && c != '\b' && i < (nbuf-1)) {
+            // Append a normal character.
+            buf[i] = c;
+            i++;
+        }
+        if (c == '\r') {
+            // Stop collecting on receiving a carriage-return character.
+            done = 1;
+            buf[i] = '\0';
+        }
+        if (c == '\b' && i > 0) {
+            // Backspace.
+            i--;
+        }
+    }
+    return i;
+}
+
+void putstr(char* str)
+{
+    for (size_t i=0; i < strlen(str); i++) putch(str[i]); 
     return;
 }

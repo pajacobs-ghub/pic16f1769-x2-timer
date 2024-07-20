@@ -6,9 +6,12 @@
 void uart1_init(unsigned int baud);
 void putch(char data);
 __bit kbhit(void);
-char getch(void);
+int getch(void);
 char getche(void);
-void uart1_close();
+void uart1_close(void);
+
+int getstr(char* buf, int nbuf);
+void putstr(char* str);
 
 #define XON 0x11
 #define XOFF 0x13

@@ -14,15 +14,8 @@
 // 2021-04-26 Refresh for UQ X2 use.
 // 2021-05-25 Update delay calculation for X2 geometry.
 // 2021-09-09 Add delay calculation for X3 expansion tube.
-//
-// Build with XC8 v2.05 C90 standard 
-// because the C99 project option seems to result in 
-// unresolved dependencies.
-// 2021-04-26 XC8 v2.31 C90 also seems to work.
-// 2021-05-25 XC8 v2.32 C90 builds ok but the device header
-//   comes from the pack PIC12-16F1xxx_DFP,1.2.63
+// 2024-07-20 Refresh for recent programming environment.
 // 
-//
 #include <xc.h>
 #pragma config FOSC = INTOSC
 #pragma config WDTE = OFF
@@ -34,13 +27,12 @@
 #include "global_defs.h"
 #include "uart.h"
 #include "HEFlash.h"
-#include <conio.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-const char * version_string = "Version 0.11 2021-09-09 PJ&PC";
+const char * version_string = "Version 0.12 2024-07-20 PJ&PC";
 
 // Some pin mappings; others are given in init_peripherals().
 #define LED_ARM LATCbits.LATC6
@@ -49,6 +41,7 @@ const char * version_string = "Version 0.11 2021-09-09 PJ&PC";
 // Parameters controlling the device are stored in virtual registers.
 #define NUMREG 4
 int16_t vregister[NUMREG]; // working copy in SRAM
+const char* hints[NUMREG] = { "mode", "level-a", "level-b", "delay" }; 
 
 void set_registers_to_original_values()
 {
@@ -80,7 +73,8 @@ char restore_registers_from_HEF()
 // Text buffer for incoming commands.
 // They are expected to be short.
 // Be careful, overruns are not handled well.
-char cmd_buf[32];
+#define NBUF 32
+char cmd_buf[NBUF];
 
 void init_peripherals()
 {
@@ -339,7 +333,7 @@ void trigger_measured_delay(void)
     __delay_ms(500);
     LATC &= 0b11001111;
     LED_ARM = 0;
-    nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
+    nchar = printf("\ntmr_count=%d cmp_count=%d\n", tmr_count, cmp_count);
 } // end trigger_measured_delay()
 
 void measured_delay_using_hardware(void)
@@ -482,7 +476,7 @@ void measured_delay_using_hardware(void)
     CCP1CONbits.MODE = 0;
     LATC &= 0b11000111;
     LED_ARM = 0;
-    nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
+    nchar = printf("\ntmr_count=%d cmp_count=%d\n", tmr_count, cmp_count);
 } // end measured_delay_using_hardware()
 
 
@@ -540,7 +534,7 @@ void trigger_measured_extra_delay_oxford(void)
     LATC &= 0b11001111;
     LED_ARM = 0;
     
-    nchar = printf("\r\ntmr_count=%d cmp_count=%d\r\n", tmr_count, cmp_count);
+    nchar = printf("\ntmr_count=%d cmp_count=%d\n", tmr_count, cmp_count);
 } // end trigger_measured_extra_delay_oxford()
 
 
@@ -612,7 +606,7 @@ void trigger_measured_extra_delay_x2x3(void)
     __delay_ms(500);
     LATC &= 0b11001111;
     
-    nchar = printf("\r\ntmr_count=%d cmp_count=%d extra_delay=%d\r\n",
+    nchar = printf("\ntmr_count=%d cmp_count=%d extra_delay=%d\n",
                    tmr_count, cmp_count, extra_delay);
 } // end trigger_measured_extra_delay_x2x3()
 
@@ -624,97 +618,97 @@ void arm_and_wait_for_event(void)
         case 1:
             nchar = printf("armed mode 1, simple firmware, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
-                nchar = printf("C1OUT already high. fail");
+                nchar = printf("C1OUT already high. fail\n");
                 break;
             }
             trigger_simple_firmware();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
         case 2:
             nchar = printf("armed mode 2, simple hardware, both outputs immediate. ");
             if (CMOUTbits.MC1OUT) {
-                nchar = printf("C1OUT already high. fail");
+                nchar = printf("C1OUT already high. fail\n");
                 break;
             }
             trigger_simple_hardware();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
         case 3:
             nchar = printf("armed mode 3, one output immediate, one fixed delay. ");
             if (CMOUTbits.MC1OUT) {
-                nchar = printf("C1OUT already high. fail");
+                nchar = printf("C1OUT already high. fail\n");
                 break;
             }
             trigger_delayed_firmware();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
         case 4:
             nchar = printf("armed mode 4, one output immediate, one measured delay. ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                printf("C1OUT already high. fail\n");
                 break;
             }
             if (CMOUTbits.MC2OUT) {
-                printf("C2OUT already high. fail");
+                printf("C2OUT already high. fail\n");
                 break;
             }
             trigger_measured_delay();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
         case 5:
             nchar = printf("armed mode 5, measured delay using hardware. ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                printf("C1OUT already high. fail\n");
                 break;
             }
             if (CMOUTbits.MC2OUT) {
-                printf("C2OUT already high. fail");
+                printf("C2OUT already high. fail\n");
                 break;
             }
             measured_delay_using_hardware();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
 		 case 6:
             nchar = printf("armed mode 6, one output immediate, one measured (Oxford optics). ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                printf("C1OUT already high. fail\n");
                 break;
             }
             if (CMOUTbits.MC2OUT) {
-                printf("C2OUT already high. fail");
+                printf("C2OUT already high. fail\n");
                 break;
             }
             trigger_measured_extra_delay_oxford();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
 		 case 7:
             nchar = printf("armed mode 7, one output immediate, one measured (X2). ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                printf("C1OUT already high. fail\n");
                 break;
             }
             if (CMOUTbits.MC2OUT) {
-                printf("C2OUT already high. fail");
+                printf("C2OUT already high. fail\n");
                 break;
             }
             trigger_measured_extra_delay_x2x3();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
 		 case 8:
             nchar = printf("armed mode 8, one output immediate, one measured (X3). ");
             if (CMOUTbits.MC1OUT) {
-                printf("C1OUT already high. fail");
+                printf("C1OUT already high. fail\n");
                 break;
             }
             if (CMOUTbits.MC2OUT) {
-                printf("C2OUT already high. fail");
+                printf("C2OUT already high. fail\n");
                 break;
             }
             trigger_measured_extra_delay_x2x3();
-            nchar = printf("triggered. ok");
+            nchar = printf("triggered. ok\n");
             break;
         default:
-            nchar = printf("unknown mode. fail");
+            nchar = printf("unknown mode. fail\n");
     }
 }
 
@@ -739,21 +733,21 @@ void interpret_command()
     int nchar;
     uint8_t i, n;
     int16_t v;
-    // printf("\rCommand text was: "); puts(cmd_buf);
-    // printf("\r\nNumber of characters in buffer: %u", strlen(cmd_buf));
+    // printf("Command text was: "\n); putstr(cmd_buf);
+    // printf("Number of characters in buffer: %u\n", strlen(cmd_buf));
     switch (cmd_buf[0]) {
         case 'v':
-            nchar = printf("%s ok", version_string);
+            nchar = printf("%s ok\n", version_string);
             break;
         case 'n':
-            nchar = printf("%u ok", NUMREG);
+            nchar = printf("%u ok\n", NUMREG);
             break;
         case 'p':
-            nchar = printf("\r\nRegister values:");
+            nchar = printf("Register values:\n");
             for (i=0; i < NUMREG; ++i) {
-                nchar = printf("\r\nreg[%d]=%d", i, vregister[i]);
+                nchar = printf("reg[%d]=%d (%s)\n", i, vregister[i], hints[i]);
             }
-            nchar = printf("\r\nok");
+            nchar = printf("ok\n");
             break;
         case 'r':
             // Report a register value.
@@ -763,12 +757,12 @@ void interpret_command()
                 i = (uint8_t) atoi(token_ptr);
                 if (i < NUMREG) {
                     v = vregister[i];
-                    nchar = printf("%d ok", v);
+                    nchar = printf("%d (%s)ok\n", v, hints[i]);
                 } else {
                     nchar = printf("fail");
                 }
             } else {
-                nchar = printf("fail");
+                nchar = printf("fail\n");
             }
             break;
         case 's':
@@ -784,35 +778,35 @@ void interpret_command()
                         // Assume text is value for register.
                         v = (int16_t) atoi(token_ptr);
                         vregister[i] = v;
-                        nchar = printf("reg[%u] %d ok", i, v);
+                        nchar = printf("reg[%u] %d (%s) ok\n", i, v, hints[i]);
                         if (i == 1 || i == 2) { update_dacs(); }
                     } else {
-                        nchar = printf("fail");
+                        nchar = printf("fail\n");
                     }
                 } else {
-                    nchar = printf("fail");
+                    nchar = printf("fail\n");
                 }
             } else {
-                nchar = printf("fail");
+                nchar = printf("fail\n");
             }
             break;
         case 'R':
             if (restore_registers_from_HEF()) {
-                nchar = printf("fail");
+                nchar = printf("fail\n");
             } else {
-                nchar = printf("ok");
+                nchar = printf("ok\n");
             }
             break;
         case 'S':
             if (save_registers_to_HEF()) {
-                nchar = printf("fail");
+                nchar = printf("fail\n");
             } else {
-                nchar = printf("ok");
+                nchar = printf("ok\n");
             }
             break;
         case 'F':
             set_registers_to_original_values();
-            nchar = printf("ok");
+            nchar = printf("ok\n");
             break;
         case 'a':
             arm_and_wait_for_event();
@@ -828,59 +822,58 @@ void interpret_command()
                 // Found some nonblank text, assume channel number.
                 i = (uint8_t) atoi(token_ptr);
                 if (i <= 31) {
-                    v = read_adc(i);
-                    nchar = printf("%d ok", v);
+                    v = (int16_t)read_adc(i);
+                    nchar = printf("%d ok\n", v);
                 } else {
-                    nchar = printf("fail");
+                    nchar = printf("fail\n");
                 }
             } else {
-                nchar = printf("fail");
+                nchar = printf("fail\n");
             }
             break;
         case 'h':
         case '?':
-            nchar = printf("\r\nPIC16F1769-I/P X2-X3-trigger+timer commands and registers");
-            nchar = printf("\r\n");
-            nchar = printf("\r\nCommands:");
-            nchar = printf("\r\n h or ? print this help message");
-            nchar = printf("\r\n v      report version of firmware");
-            nchar = printf("\r\n n      report number of registers");
-            nchar = printf("\r\n p      report register values");
-            nchar = printf("\r\n r <i>  report value of register i");
-            nchar = printf("\r\n s <i> <j>  set register i to value j");
-            nchar = printf("\r\n R      restore register values from HEFlash");
-            nchar = printf("\r\n S      save register values to HEFlash");
-            nchar = printf("\r\n F      set register values to original values");
-            nchar = printf("\r\n a      arm device and wait for event");
-            nchar = printf("\r\n m      wait for manual arm button press");
-            nchar = printf("\r\n c <i>  convert analogue channel i");
-            nchar = printf("\r\n        i=30 DAC1_output");
-            nchar = printf("\r\n        i=28 DAC2_output");
-            nchar = printf("\r\n        i=5  RC1/AN5/C1IN1- (IN a)");
-            nchar = printf("\r\n        i=6  RC2/AN6/C2IN2- (IN b)");
-            nchar = printf("\r\n");
-            nchar = printf("\r\nRegisters:");
-            nchar = printf("\r\n 0  mode: 1= simple trigger (firmware), both outputs immediate");
-            nchar = printf("\r\n          2= simple trigger (hardware), both outputs immediate");
-            nchar = printf("\r\n          3= delayed trigger, output a immediate, b delayed");
-            nchar = printf("\r\n          4= measured delay (firmware), output a immediate, b delayed");
-            nchar = printf("\r\n          5= measured delay (hardware), output a immediate, b delayed");
-            nchar = printf("\r\n          6= measured delay for Oxford tunnel, output a immediate, b delayed");
-            nchar = printf("\r\n          7= measured delay for X2 AT4-AT7, output a AT4, b test-section");
-            nchar = printf("\r\n          8= measured delay for X3 AT6-AT7, output a AT6, b test-section");
-            nchar = printf("\r\n 1  trigger level a as a 10-bit count, 0-1023");
-            nchar = printf("\r\n 2  trigger level b as a 10-bit count, 0-1023");
-            nchar = printf("\r\n 3  (extra) delay as 16-bit count (8 ticks per us)");
-            nchar = printf("\r\nok");
+            nchar = printf("PIC16F1769-I/P X2-X3-trigger+timer commands and registers\n");
+            nchar = printf("\n");
+            nchar = printf("Commands:\n");
+            nchar = printf(" h or ? print this help message\n");
+            nchar = printf(" v      report version of firmware\n");
+            nchar = printf(" n      report number of registers\n");
+            nchar = printf(" p      report register values\n");
+            nchar = printf(" r <i>  report value of register i\n");
+            nchar = printf(" s <i> <j>  set register i to value j\n");
+            nchar = printf(" R      restore register values from HEFlash\n");
+            nchar = printf(" S      save register values to HEFlash\n");
+            nchar = printf(" F      set register values to original values\n");
+            nchar = printf(" a      arm device and wait for event\n");
+            nchar = printf(" m      wait for manual arm button press\n");
+            nchar = printf(" c <i>  convert analogue channel i\n");
+            nchar = printf("        i=30 DAC1_output\n");
+            nchar = printf("        i=28 DAC2_output\n");
+            nchar = printf("        i=5  RC1/AN5/C1IN1- (IN a)\n");
+            nchar = printf("        i=6  RC2/AN6/C2IN2- (IN b)\n");
+            nchar = printf("\n");
+            nchar = printf("Registers:\n");
+            nchar = printf(" 0  mode: 1= simple trigger (firmware), both outputs immediate\n");
+            nchar = printf("          2= simple trigger (hardware), both outputs immediate\n");
+            nchar = printf("          3= delayed trigger, output a immediate, b delayed\n");
+            nchar = printf("          4= measured delay (firmware), output a immediate, b delayed\n");
+            nchar = printf("          5= measured delay (hardware), output a immediate, b delayed\n");
+            nchar = printf("          6= measured delay for Oxford tunnel, output a immediate, b delayed\n");
+            nchar = printf("          7= measured delay for X2 AT4-AT7, output a AT4, b test-section\n");
+            nchar = printf("          8= measured delay for X3 AT6-AT7, output a AT6, b test-section\n");
+            nchar = printf(" 1  trigger level a as a 10-bit count, 0-1023\n");
+            nchar = printf(" 2  trigger level b as a 10-bit count, 0-1023\n");
+            nchar = printf(" 3  (extra) delay as 16-bit count (8 ticks per us)\n");
+            nchar = printf("ok\n");
             break;
         default:
-            nchar = printf("fail");
+            nchar = printf("fail\n");
     } // end switch
 } // end interpret_command())
 
 int main(void)
 {
-    char* buf_ptr;
     int nchar;
     //
     // Initialize core, then peripherals.
@@ -889,23 +882,23 @@ int main(void)
     //
     // Power-on values for registers.
     if (restore_registers_from_HEF()) {
-        nchar = printf("Failed to restore registers from HEF.");
+        nchar = printf("Failed to restore registers from HEF.\n");
         set_registers_to_original_values();
     }
     update_dacs();
     //
     // Announce that the box is awake.
-    nchar = printf("\r\nX2-X3 shock-speed trigger and timer, %s.", version_string);
+    nchar = printf("X2-X3 shock-speed trigger and timer, %s.\n", version_string);
     //
     // The basic behaviour is to be forever checking for a text command.
-    nchar = printf("\r\ncmd> ");
+    nchar = printf("cmd> ");
     while (1) {
         // Characters are echoed as they are typed.
         // Backspace deleting is allowed.
-        buf_ptr = gets(cmd_buf); 
-        if (buf_ptr) {
+        nchar = getstr(cmd_buf, NBUF); 
+        if (nchar > 0) {
             interpret_command();
-            nchar = printf("\r\ncmd> ");
+            nchar = printf("cmd> ");
         }
     } // end while
     uart1_close();

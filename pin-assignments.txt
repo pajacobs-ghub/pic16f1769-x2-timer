@@ -3,8 +3,8 @@ PIC16F1769-I/P pin assignments for x2-trigger+timer
                     VDD  1 |~~| 20 VSS
    SW0              RA5  2 |  | 19 RA0/PGD
                     RA4  3 |  | 18 RA1/PGC
-   RESET      !MCLR/RA3  4 |  | 17 RA2              CTS#
-   OUTa             RC5  5 |  | 16 RC0              RTS#
+   RESET      !MCLR/RA3  4 |  | 17 RA2              MCU_RTS#
+   OUTa             RC5  5 |  | 16 RC0              MCU_CTS#
    OUTb             RC4  6 |  | 15 RC1/AN5/C1IN1-   INa
                     RC3  7 |  | 14 RC2/AN6/C2IN2-   INb
    LEDa(arm)        RC6  8 |  | 13 RB4/SDA

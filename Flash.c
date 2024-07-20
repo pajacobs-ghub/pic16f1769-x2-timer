@@ -57,16 +57,21 @@ void FLASH_readBlock( unsigned *buffer, unsigned address, char count)
  */
 void _unlock( void)
 {
-    #asm
-        BANKSEL     PMCON2
-        MOVLW       0x55
-        MOVWF       PMCON2 & 0x7F
-        MOVLW       0xAA
-        MOVWF       PMCON2 & 0x7F
-        BSF         PMCON1 & 0x7F,1    ; set WR bit
-        NOP
-        NOP
-    #endasm
+    PMCON2 = 0x55;
+    PMCON2 = 0xAA;
+    PMCON1bits.WR = 1;
+    NOP(); NOP();
+    // XC8 v2.46 does not accept the following assembly code.
+//    #asm
+//        BANKSEL     PMCON2
+//        MOVLW       0x55
+//        MOVWF       PMCON2 & 0x7F
+//        MOVLW       0xAA
+//        MOVWF       PMCON2 & 0x7F
+//        BSF         PMCON1 & 0x7F,1    ; set WR bit
+//        NOP
+//        NOP
+//    #endasm
 } // unlock
 
 
